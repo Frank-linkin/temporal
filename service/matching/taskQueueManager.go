@@ -193,6 +193,11 @@ func newTaskQueueManager(
 	clusterMeta cluster.Metadata,
 	opts ...taskQueueManagerOpt,
 ) (taskQueueManager, error) {
+	/**
+	[TaskQueueManager]
+	根据namespace,taskQueue,
+	每个TaskQueueManager都有一个DB。
+	*/
 	namespaceEntry, err := e.namespaceRegistry.GetNamespaceByID(taskQueue.namespaceID)
 	if err != nil {
 		return nil, err
@@ -213,17 +218,18 @@ func newTaskQueueManager(
 		taskQueueKind,
 	).Tagged(metrics.TaskQueueTypeTag(taskQueue.taskType))
 	tlMgr := &taskQueueManagerImpl{
-		status:               common.DaemonStatusInitialized,
-		namespaceRegistry:    e.namespaceRegistry,
-		matchingClient:       e.matchingClient,
-		metricsClient:        e.metricsClient,
-		taskQueueID:          taskQueue,
-		taskQueueKind:        taskQueueKind,
-		logger:               logger,
-		db:                   db,
-		taskAckManager:       newAckManager(e.logger),
-		taskGC:               newTaskGC(db, taskQueueConfig),
-		config:               taskQueueConfig,
+		status:            common.DaemonStatusInitialized,
+		namespaceRegistry: e.namespaceRegistry,
+		matchingClient:    e.matchingClient,
+		metricsClient:     e.metricsClient,
+		taskQueueID:       taskQueue,
+		taskQueueKind:     taskQueueKind,
+		logger:            logger,
+		db:                db,
+		taskAckManager:    newAckManager(e.logger),
+		taskGC:            newTaskGC(db, taskQueueConfig),
+		config:            taskQueueConfig,
+		//其实就是获取poller的信息的Cache，给每个poller一个identity。而poller信息只有一个ratePerSecond
 		pollerHistory:        newPollerHistory(),
 		outstandingPollsMap:  make(map[string]context.CancelFunc),
 		signalFatalProblem:   e.unloadTaskQueue,
@@ -333,6 +339,7 @@ func (c *taskQueueManagerImpl) WaitUntilInitialized(ctx context.Context) error {
 // AddTask adds a task to the task queue. This method will first attempt a synchronous
 // match with a poller. When there are no pollers or if ratelimit is exceeded, task will
 // be written to database and later asynchronously matched with a poller
+// 创建Task，Task会被添加到Tasks table中
 func (c *taskQueueManagerImpl) AddTask(
 	ctx context.Context,
 	params addTaskParams,
@@ -341,7 +348,8 @@ func (c *taskQueueManagerImpl) AddTask(
 		// request sent by history service
 		c.liveness.markAlive(time.Now())
 	}
-
+	//Question: QueueID为什么还有Root
+	//猜想，可能是rootWorkflow
 	if c.QueueID().IsRoot() && !c.HasPollerAfter(time.Now().Add(-noPollerThreshold)) {
 		// Only checks recent pollers in the root partition
 		c.metricScope.IncCounter(metrics.NoRecentPollerTasksPerTaskQueueCounter)
@@ -354,6 +362,10 @@ func (c *taskQueueManagerImpl) AddTask(
 		return false, err
 	}
 
+	clusterInfos := c.clusterMeta.GetAllClusterInfo()
+	for _, clusterInfo := range clusterInfos {
+		c.logger.Info("Joehanm-AddTask ClusterMeta", tag.WorkflowID(clusterInfo.RPCAddress))
+	}
 	if namespaceEntry.ActiveInCluster(c.clusterMeta.GetCurrentClusterName()) {
 		syncMatch, err := c.trySyncMatch(ctx, params)
 		if syncMatch {
@@ -370,6 +382,7 @@ func (c *taskQueueManagerImpl) AddTask(
 	_, err = c.taskWriter.appendTask(params.execution, taskInfo)
 	c.signalIfFatal(err)
 	if err == nil {
+		// 添加task成功后会SignalTaskReader
 		c.taskReader.Signal()
 	}
 	return false, err
@@ -379,10 +392,15 @@ func (c *taskQueueManagerImpl) AddTask(
 // Returns error when context deadline is exceeded
 // maxDispatchPerSecond is the max rate at which tasks are allowed
 // to be dispatched from this task queue to pollers
+// 1.在c.outstandingPollsMap装入该pollerIDKey的cancel function
+// 2.获取identity，将Poller的Identity放入LRU的Cache
+// 3.设置matcher的RateLimit
+// 4.从Matcher中读出一个任务，装入（namespace，backlogCount）信息后返回此task
 func (c *taskQueueManagerImpl) GetTask(
 	ctx context.Context,
 	maxDispatchPerSecond *float64,
 ) (*internalTask, error) {
+	//[Question] liveness是用来做什么的
 	c.liveness.markAlive(time.Now())
 
 	// We need to set a shorter timeout than the original ctx; otherwise, by the time ctx deadline is
@@ -392,10 +410,12 @@ func (c *taskQueueManagerImpl) GetTask(
 	childCtx, cancel := c.newChildContext(ctx, c.config.LongPollExpirationInterval(), returnEmptyTaskTimeBudget)
 	defer cancel()
 
+	// 作用见下方注释
 	pollerID, ok := ctx.Value(pollerIDKey).(string)
 	if ok && pollerID != "" {
 		// Found pollerID on context, add it to the map to allow it to be canceled in
 		// response to CancelPoller call
+		// c.outstandingPollsLock 如字面意义所示
 		c.outstandingPollsLock.Lock()
 		c.outstandingPollsMap[pollerID] = cancel
 		c.outstandingPollsLock.Unlock()
@@ -406,6 +426,7 @@ func (c *taskQueueManagerImpl) GetTask(
 		}()
 	}
 
+	//从ctx里获取identityKey，如果有，就updatePollerInfo,将PollerInfo放入LRU的Cache
 	identity, ok := ctx.Value(identityKey).(string)
 	if ok && identity != "" {
 		c.pollerHistory.updatePollerInfo(pollerIdentity(identity), maxDispatchPerSecond)
@@ -425,17 +446,20 @@ func (c *taskQueueManagerImpl) GetTask(
 	// one rateLimiter for this entire task queue and as we get polls,
 	// we update the ratelimiter rps if it has changed from the last
 	// value. Last poller wins if different pollers provide different values
+	// 每个Worker里面有个maxDispatchPerSecond,如果两个Worker同时Poll，那么lastWriteWins
 	c.matcher.UpdateRatelimit(maxDispatchPerSecond)
 
+	//[Question] namespaceEntry.ActiveInCluster是什么意思
 	if !namespaceEntry.ActiveInCluster(c.clusterMeta.GetCurrentClusterName()) {
 		return c.matcher.PollForQuery(childCtx)
 	}
 
+	//尝试从macher的taskC,QueryTaskC中Poll出一个任务来
 	task, err := c.matcher.Poll(childCtx)
 	if err != nil {
 		return nil, err
 	}
-
+	//给poll出的task【namespace,backlogCountHint】信息
 	task.namespace = c.namespace
 	task.backlogCountHint = c.taskAckManager.getBacklogCountHint()
 	return task, nil
@@ -444,6 +468,11 @@ func (c *taskQueueManagerImpl) GetTask(
 // DispatchTask dispatches a task to a poller. When there are no pollers to pick
 // up the task or if rate limit is exceeded, this method will return error. Task
 // *will not* be persisted to db
+// 底层调用了MustOffer
+// MustOffer blocks until a consumer is found to handle this task Returns error
+// only when context is canceled or the ratelimit is set to zero (allow nothing)
+// The passed in context MUST NOT have a deadline associated with it
+// 这个offer操作是没有timeLimit的，只有context取消，或者rateLimi置为0时，才会返回，否则会一直等
 func (c *taskQueueManagerImpl) DispatchTask(
 	ctx context.Context,
 	task *internalTask,
@@ -453,6 +482,8 @@ func (c *taskQueueManagerImpl) DispatchTask(
 
 // DispatchQueryTask will dispatch query to local or remote poller. If forwarded then result or error is returned,
 // if dispatched to local poller then nil and nil is returned.
+// 先根据taskID和request信息获取一个task，调用matcher的OfferQuery
+// Query也是要么直接给poller，然后就尝试给parent TaskQueue，如果还不成功就一直block
 func (c *taskQueueManagerImpl) DispatchQueryTask(
 	ctx context.Context,
 	taskID string,
@@ -464,6 +495,7 @@ func (c *taskQueueManagerImpl) DispatchQueryTask(
 
 // GetVersioningData returns the versioning data for the task queue if any. If this task queue is a sub-partition and
 // has no cached data, it will explicitly attempt a fetch from the root partition.
+// 功能如上面注释所示,就是从task_queue table中读取data信息，decode，然后从中提取version信息
 func (c *taskQueueManagerImpl) GetVersioningData(ctx context.Context) (*persistencespb.VersioningData, error) {
 	vd, err := c.db.GetVersioningData(ctx)
 	if errors.Is(err, errVersioningDataNotPresentOnPartition) {
@@ -475,7 +507,9 @@ func (c *taskQueueManagerImpl) GetVersioningData(ctx context.Context) (*persiste
 	return vd, err
 }
 
+//MutateVersioningData 修改root的mutateVersionData,然后通知各个child taskQueue使用metaDataPoller去取
 func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator func(*persistencespb.VersioningData) error) error {
+	//[conclusion] 只有root taskQueue才有versionData
 	newDat, err := c.db.MutateVersioningData(ctx, mutator)
 	c.signalIfFatal(err)
 	if err != nil {
@@ -484,6 +518,7 @@ func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator
 	// We will have errored already if this was not the root workflow partition.
 	// Now notify partitions that they should fetch changed data from us
 	numParts := util.Max(c.config.NumReadPartitions(), c.config.NumWritePartitions())
+	//[Acknowledge] WaitGroup其实就是countDownLatch
 	wg := &sync.WaitGroup{}
 	for i := 0; i < numParts; i++ {
 		for _, tqt := range []enumspb.TaskQueueType{enumspb.TASK_QUEUE_TYPE_WORKFLOW, enumspb.TASK_QUEUE_TYPE_ACTIVITY} {
@@ -492,6 +527,7 @@ func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator
 			}
 			wg.Add(1)
 			go func(i int, tqt enumspb.TaskQueueType) {
+				//生成partition的taskQueue
 				tq := c.taskQueueID.mkName(i)
 				_, err := c.matchingClient.InvalidateTaskQueueMetadata(ctx,
 					&matchingservice.InvalidateTaskQueueMetadataRequest{
@@ -512,6 +548,7 @@ func (c *taskQueueManagerImpl) MutateVersioningData(ctx context.Context, mutator
 	return nil
 }
 
+//InvalidateMetadata 这个跟MutateVersioningData一对的，它的作用修改自己的versionData，然后使用metadataPoller去取metadata
 func (c *taskQueueManagerImpl) InvalidateMetadata(request *matchingservice.InvalidateTaskQueueMetadataRequest) error {
 	if request.GetVersioningData() != nil {
 		if c.taskQueueID.IsRoot() && c.taskQueueID.taskType == enumspb.TASK_QUEUE_TYPE_WORKFLOW {
@@ -519,6 +556,7 @@ func (c *taskQueueManagerImpl) InvalidateMetadata(request *matchingservice.Inval
 			c.logger.Warn("A root workflow partition was told to invalidate its versioning data, this should not happen")
 			return nil
 		}
+		//直接修改自己的VersioningData为request中的data
 		c.db.setVersioningDataForNonRootPartition(request.GetVersioningData())
 		c.metadataPoller.StartIfUnstarted()
 	}
@@ -526,10 +564,13 @@ func (c *taskQueueManagerImpl) InvalidateMetadata(request *matchingservice.Inval
 }
 
 // GetAllPollerInfo returns all pollers that polled from this taskqueue in last few minutes
+// 返回所有的Poller的信息
 func (c *taskQueueManagerImpl) GetAllPollerInfo() []*taskqueuepb.PollerInfo {
 	return c.pollerHistory.getPollerInfo(time.Time{})
 }
 
+//HasPollerAfter 如果有OutstandingPoller，那么一定有accessTime符合条件的Poller
+// 如果没有如果有OutstandingPoller，那就用getPollerInfo遍历去找
 func (c *taskQueueManagerImpl) HasPollerAfter(accessTime time.Time) bool {
 	inflightPollerCount := 0
 	c.outstandingPollsLock.Lock()
@@ -542,6 +583,7 @@ func (c *taskQueueManagerImpl) HasPollerAfter(accessTime time.Time) bool {
 	return len(recentPollers) > 0
 }
 
+//CancelPoller 使用outstandingPollsMap获取其cancel函数，然后运行cancel
 func (c *taskQueueManagerImpl) CancelPoller(pollerID string) {
 	c.outstandingPollsLock.Lock()
 	cancel, ok := c.outstandingPollsMap[pollerID]
@@ -555,6 +597,7 @@ func (c *taskQueueManagerImpl) CancelPoller(pollerID string) {
 // DescribeTaskQueue returns information about the target taskqueue, right now this API returns the
 // pollers which polled this taskqueue in last few minutes and status of taskqueue's ackManager
 // (readLevel, ackLevel, backlogCountHint and taskIDBlock).
+// 所有的Poller信息和TaskQueueStatus信息（如上面）
 func (c *taskQueueManagerImpl) DescribeTaskQueue(includeTaskQueueStatus bool) *matchingservice.DescribeTaskQueueResponse {
 	response := &matchingservice.DescribeTaskQueueResponse{Pollers: c.GetAllPollerInfo()}
 	if !includeTaskQueueStatus {
@@ -597,6 +640,7 @@ func (c *taskQueueManagerImpl) String() string {
 // here. As part of completion:
 //   - task is deleted from the database when err is nil
 //   - new task is created and current task is deleted when err is not nil
+// 作用如上面的阐述
 func (c *taskQueueManagerImpl) completeTask(task *persistencespb.AllocatedTaskInfo, err error) {
 	if err != nil {
 		// failed to start the task.
@@ -624,6 +668,7 @@ func (c *taskQueueManagerImpl) completeTask(task *persistencespb.AllocatedTaskIn
 			c.signalFatalProblem(c)
 			return
 		}
+		// CompleteTask出错了，前面调用了taskWriter把任务写了进去，所以要用Reader再读出来
 		c.taskReader.Signal()
 	}
 
@@ -659,7 +704,9 @@ func executeWithRetry(
 	return err
 }
 
+//trySyncMatch 尝试同步向matcher添加task，1s内为完成就超时
 func (c *taskQueueManagerImpl) trySyncMatch(ctx context.Context, params addTaskParams) (bool, error) {
+	//建立一个1秒的context
 	childCtx, cancel := c.newChildContext(ctx, c.config.SyncMatchWaitDuration(), time.Second)
 
 	// Mocking out TaskId for syncmatch as it hasn't been allocated yet
@@ -667,7 +714,7 @@ func (c *taskQueueManagerImpl) trySyncMatch(ctx context.Context, params addTaskP
 		Data:   params.taskInfo,
 		TaskId: syncMatchTaskId,
 	}
-
+	//制作一个新的task,然后通过matcher添加
 	task := newInternalTask(fakeTaskIdWrapper, nil, params.source, params.forwardedFrom, true)
 	matched, err := c.matcher.Offer(childCtx, task)
 	cancel()
@@ -732,6 +779,9 @@ func (c *taskQueueManagerImpl) fetchMetadataFromRootPartitionOnInit(ctx context.
 
 // fetchMetadataFromRootPartition fetches metadata from root partition iff this partition is not a root partition.
 // Returns the fetched data, if fetching was necessary and successful.
+// 将已有的versionData取出来做一个Hash，然后GetTaskQueueMetadata发送Hash值出去，如果root taskQueue发现hash值一致，就会返回true，
+// 否则就会返回versionData,
+// root TaskQueue的Hash值；如果不一致，就开启metadataPoller
 func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Context) (*persistencespb.VersioningData, error) {
 	// Nothing to do if we are the root partition of a workflow queue, since we should own the data.
 	// (for versioning - any later added metadata may need to not abort so early)
@@ -774,6 +824,7 @@ func (c *taskQueueManagerImpl) fetchMetadataFromRootPartition(ctx context.Contex
 
 // StartIfUnstarted starts the poller if it's not already started. The passed in function is called repeatedly
 // and if it returns true, the poller will shut down, at which point it may be started again.
+// 解释如上
 func (mp *metadataPoller) StartIfUnstarted() {
 	if mp.running.Load() {
 		return
@@ -781,6 +832,8 @@ func (mp *metadataPoller) StartIfUnstarted() {
 	go mp.pollLoop()
 }
 
+//pollLoop 每隔一段时间就fetchMetadataFromRootPartition，如果没有fetch到数据就停止返回，直到
+//直到下一次told to invalidate data
 func (mp *metadataPoller) pollLoop() {
 	mp.running.Store(true)
 	defer mp.running.Store(false)

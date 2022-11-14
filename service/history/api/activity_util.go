@@ -34,6 +34,7 @@ import (
 	"go.temporal.io/server/service/history/workflow"
 )
 
+//SetActivityTaskRunID 从workflowConsistencyChecker获取当前runID，然后赋值给token
 func SetActivityTaskRunID(
 	ctx context.Context,
 	token *tokenspb.Task,

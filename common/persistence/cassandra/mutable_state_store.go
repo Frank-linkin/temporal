@@ -27,6 +27,7 @@ package cassandra
 import (
 	"context"
 	"fmt"
+	"go.temporal.io/server/common/log/tag"
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -378,6 +379,9 @@ func (d *MutableStateStore) CreateWorkflowExecution(
 ) (*p.InternalCreateWorkflowExecutionResponse, error) {
 	batch := d.Session.NewBatch(gocql.LoggedBatch).WithContext(ctx)
 
+	d.Logger.Info("Joehanm-func (d *MutableStateStore) CreateWorkflowExecution:", tag.NewInt("CreateWorkflowMode", int(request.Mode)),
+		tag.NewStringTag("workflowID", request.NewWorkflowSnapshot.WorkflowID),
+		tag.NewStringTag("RunID", request.NewWorkflowSnapshot.RunID))
 	shardID := request.ShardID
 	newWorkflow := request.NewWorkflowSnapshot
 	lastWriteVersion := newWorkflow.LastWriteVersion
@@ -411,7 +415,7 @@ func (d *MutableStateStore) CreateWorkflowExecution(
 		)
 
 		requestCurrentRunID = request.PreviousRunID
-
+	//这个看起来像是创建一个Execution
 	case p.CreateWorkflowModeBrandNew:
 		batch.Query(templateCreateCurrentWorkflowExecutionQuery,
 			shardID,

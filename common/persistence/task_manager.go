@@ -91,6 +91,7 @@ func (m *taskManagerImpl) CreateTaskQueue(
 	return &CreateTaskQueueResponse{}, nil
 }
 
+//UpdateTaskQueue 将taskQueueInfo序列化成taskQueueInfoBlob，插入Task_queues table中
 func (m *taskManagerImpl) UpdateTaskQueue(
 	ctx context.Context,
 	request *UpdateTaskQueueRequest,
@@ -102,6 +103,7 @@ func (m *taskManagerImpl) UpdateTaskQueue(
 	if taskQueueInfo.ExpiryTime == nil && taskQueueInfo.GetKind() == enumspb.TASK_QUEUE_KIND_STICKY {
 		panic("UpdateTaskQueue encountered ExpiryTime not set for sticky task queue")
 	}
+	//将taskQueueInfo序列化成taskQueueInfoBlob
 	taskQueueInfoBlob, err := m.serializer.TaskQueueInfoToBlob(taskQueueInfo, enumspb.ENCODING_TYPE_PROTO3)
 	if err != nil {
 		return nil, err
@@ -119,6 +121,7 @@ func (m *taskManagerImpl) UpdateTaskQueue(
 
 		PrevRangeID: request.PrevRangeID,
 	}
+	//请求taskManager.UpdateTaskQueue
 	return m.taskStore.UpdateTaskQueue(ctx, internalRequest)
 }
 
@@ -178,17 +181,23 @@ func (m *taskManagerImpl) DeleteTaskQueue(
 	return m.taskStore.DeleteTaskQueue(ctx, request)
 }
 
+//CreateTasks 将CacheQueueInfo做成taskQueueInfoBlob,将TaskInfo做成Blob,每个Task的ExpiryTime就是TaskQueue的ExpiryTime
+//向TaskManager请求CreateTask，tasks信息更新到数据库Tasks table中（MySql并没有用到taskQueueInfoBlob）
 func (m *taskManagerImpl) CreateTasks(
 	ctx context.Context,
 	request *CreateTasksRequest,
 ) (*CreateTasksResponse, error) {
+
+	//获取cachedQueueInfo。
 	taskQueueInfo := request.TaskQueueInfo.Data
 	taskQueueInfo.LastUpdateTime = timestamp.TimeNowPtrUtc()
+	//将cachedQueueInfo制作成taskQueueInfoBlob
 	taskQueueInfoBlob, err := m.serializer.TaskQueueInfoToBlob(taskQueueInfo, enumspb.ENCODING_TYPE_PROTO3)
 	if err != nil {
 		return nil, err
 	}
 
+	//将TaskInfo做成Blob,每个Task的ExpiryTime就是TaskQueue的ExpiryTime
 	tasks := make([]*InternalCreateTask, len(request.Tasks))
 	for i, task := range request.Tasks {
 		taskBlob, err := m.serializer.TaskInfoToBlob(task, enumspb.ENCODING_TYPE_PROTO3)

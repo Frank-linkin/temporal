@@ -416,10 +416,12 @@ func (e *historyEngineImpl) StartWorkflowExecution(
 	ctx context.Context,
 	startRequest *historyservice.StartWorkflowExecutionRequest,
 ) (resp *historyservice.StartWorkflowExecutionResponse, retError error) {
+	//[joehanm-StartWorkflowExecution-historyService调用historyEngine也是用了rpc调用]
 	return startworkflow.Invoke(ctx, startRequest, e.shard, e.workflowConsistencyChecker)
 }
 
 // GetMutableState retrieves the mutable state of the workflow execution
+//
 func (e *historyEngineImpl) GetMutableState(
 	ctx context.Context,
 	request *historyservice.GetMutableStateRequest,
@@ -474,6 +476,7 @@ func (e *historyEngineImpl) getMutableStateOrPolling(
 	}
 
 	if len(request.Execution.RunId) == 0 {
+		//[Question] 是不是意味着前面执行过？
 		request.Execution.RunId, err = e.workflowConsistencyChecker.GetCurrentRunID(
 			ctx,
 			request.NamespaceId,
@@ -1457,7 +1460,6 @@ func (e *historyEngineImpl) ReplicateEventsV2(
 	ctx context.Context,
 	replicateRequest *historyservice.ReplicateEventsV2Request,
 ) error {
-
 	return e.nDCReplicator.ApplyEvents(ctx, replicateRequest)
 }
 

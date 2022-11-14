@@ -90,6 +90,7 @@ type (
 	HistoryExecution interface {
 		InsertIntoExecutions(ctx context.Context, row *ExecutionsRow) (sql.Result, error)
 		UpdateExecutions(ctx context.Context, row *ExecutionsRow) (sql.Result, error)
+		//从execution table中获取目标行
 		SelectFromExecutions(ctx context.Context, filter ExecutionsFilter) (*ExecutionsRow, error)
 		DeleteFromExecutions(ctx context.Context, filter ExecutionsFilter) (sql.Result, error)
 		ReadLockExecutions(ctx context.Context, filter ExecutionsFilter) (int64, int64, error)

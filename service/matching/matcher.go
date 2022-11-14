@@ -132,6 +132,7 @@ func newTaskMatcher(config *taskQueueConfig, fwdr *Forwarder, scope metrics.Scop
 //  - ratelimit is exceeded (does not apply to query task)
 //  - context deadline is exceeded
 //  - task is matched and consumer returns error in response channel
+// 如英文描述所说，尝试把task发送到c.taskC，如果发送不成功就尝试forward给parent。如果符合上文所说的条件，不能forward就还是继续等待
 func (tm *TaskMatcher) Offer(ctx context.Context, task *internalTask) (bool, error) {
 	if !task.isForwarded() {
 		if err := tm.rateLimiter.Wait(ctx); err != nil {
@@ -141,6 +142,7 @@ func (tm *TaskMatcher) Offer(ctx context.Context, task *internalTask) (bool, err
 	}
 
 	select {
+	//taskC是没有缓存的，如果发送成功就证明有一个Poller在等待接受任务
 	case tm.taskC <- task: // poller picked up the task
 		if task.responseC != nil {
 			// if there is a response channel, block until resp is received
@@ -174,6 +176,7 @@ func (tm *TaskMatcher) Offer(ctx context.Context, task *internalTask) (bool, err
 	}
 }
 
+//offerOrTimeout 要么offer成功，要么timeout，只在上面的函数用了
 func (tm *TaskMatcher) offerOrTimeout(ctx context.Context, task *internalTask) (bool, error) {
 	select {
 	case tm.taskC <- task: // poller picked up the task
@@ -194,6 +197,7 @@ func (tm *TaskMatcher) offerOrTimeout(ctx context.Context, task *internalTask) (
 // OfferQuery will either match task to local poller or will forward query task.
 // Local match is always attempted before forwarding is attempted. If local match occurs
 // response and error are both nil, if forwarding occurs then response or error is returned.
+// Query也是要么直接给poller，然后就尝试给parent TaskQueue，如果还不成功就一直block
 func (tm *TaskMatcher) OfferQuery(ctx context.Context, task *internalTask) (*matchingservice.QueryWorkflowResponse, error) {
 	select {
 	case tm.queryTaskC <- task:
@@ -231,6 +235,7 @@ func (tm *TaskMatcher) OfferQuery(ctx context.Context, task *internalTask) (*mat
 // MustOffer blocks until a consumer is found to handle this task
 // Returns error only when context is canceled or the ratelimit is set to zero (allow nothing)
 // The passed in context MUST NOT have a deadline associated with it
+// 这个offer操作是没有timeLimit的，只有context取消，或者rateLimi置为0时，才会返回，否则会一直等待
 func (tm *TaskMatcher) MustOffer(ctx context.Context, task *internalTask) error {
 	if err := tm.rateLimiter.Wait(ctx); err != nil {
 		return err
@@ -288,22 +293,30 @@ forLoop:
 // Poll blocks until a task is found or context deadline is exceeded
 // On success, the returned task could be a query task or a regular task
 // Returns ErrNoTasks when context deadline is exceeded
+// 尝试从一下几个来源中获取task,如果ctx超时，就返回：
+// 1. c.taskC
+// 2. c.QueryTaskC
+// 3. forwarder
+// 以上都没有就block
 func (tm *TaskMatcher) Poll(ctx context.Context) (*internalTask, error) {
 	return tm.poll(ctx, false)
 }
 
 // PollForQuery blocks until a *query* task is found or context deadline is exceeded
 // Returns ErrNoTasks when context deadline is exceeded
+// Poll 和 PollForQuery is twins, poll什么任务都拉，PollForQuery只PollQuery
 func (tm *TaskMatcher) PollForQuery(ctx context.Context) (*internalTask, error) {
 	return tm.poll(ctx, true)
 }
 
 // UpdateRatelimit updates the task dispatch rate
+// 主要是burst和rate
 func (tm *TaskMatcher) UpdateRatelimit(rps *float64) {
 	if rps == nil {
 		return
 	}
 
+	//如果Partition，rate = rps/partitionNum，然后再向上取整，就是burst
 	rate := *rps
 	nPartitions := float64(tm.numPartitions())
 	if nPartitions > 0 {
@@ -312,6 +325,7 @@ func (tm *TaskMatcher) UpdateRatelimit(rps *float64) {
 	}
 	burst := int(math.Ceil(rate))
 
+	//burst最小只能=minTaskThrottlingBurstSize
 	minTaskThrottlingBurstSize := tm.config.MinTaskThrottlingBurstSize()
 	if burst < minTaskThrottlingBurstSize {
 		burst = minTaskThrottlingBurstSize
@@ -319,6 +333,7 @@ func (tm *TaskMatcher) UpdateRatelimit(rps *float64) {
 
 	tm.dynamicRateBurst.SetRate(rate)
 	tm.dynamicRateBurst.SetBurst(burst)
+	// 只在第一次设置的时候立即生效，其他时候都是等待1min的生效间隙生效
 	tm.forceRefreshRateOnce.Do(func() {
 		// Dynamic rate limiter only refresh its rate every 1m. Before that initial 1m interval, it uses default rate
 		// which is 10K and is too large in most cases. We need to force refresh for the first time this rate is set
@@ -332,6 +347,11 @@ func (tm *TaskMatcher) Rate() float64 {
 	return tm.rateLimiter.Rate()
 }
 
+//Poll 尝试从一下几个来源中获取task,如果ctx超时，就返回：
+// 1. c.taskC
+// 2. c.QueryTaskC
+// 3. forwarder
+// 以上都没有就block
 func (tm *TaskMatcher) poll(ctx context.Context, queryOnly bool) (*internalTask, error) {
 	taskC, queryTaskC := tm.taskC, tm.queryTaskC
 	if queryOnly {
@@ -359,6 +379,7 @@ func (tm *TaskMatcher) poll(ctx context.Context, queryOnly bool) (*internalTask,
 
 	// 2. taskC and queryTaskC
 	select {
+	//从taskC中获取到任务代表同步调用成功，从queryTaskC中获取到也一样
 	case task := <-taskC:
 		if task.responseC != nil {
 			tm.scope.IncCounter(metrics.PollSuccessWithSyncPerTaskQueueCounter)
@@ -387,6 +408,7 @@ func (tm *TaskMatcher) poll(ctx context.Context, queryOnly bool) (*internalTask,
 		tm.scope.IncCounter(metrics.PollSuccessWithSyncPerTaskQueueCounter)
 		tm.scope.IncCounter(metrics.PollSuccessPerTaskQueueCounter)
 		return task, nil
+		//从
 	case token := <-tm.fwdrPollReqTokenC():
 		if task, err := tm.fwdr.ForwardPoll(ctx); err == nil {
 			token.release()

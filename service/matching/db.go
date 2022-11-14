@@ -99,17 +99,23 @@ func (db *taskQueueDB) RangeID() int64 {
 
 // RenewLease renews the lease on a taskqueue. If there is no previous lease,
 // this method will attempt to steal taskqueue from current owner
+// 如果rangeID等于0，就从其他owner那里偷取一个taskQueue，读取rangID后，将RangeID+1
+// 如果rangeID>0,
 func (db *taskQueueDB) RenewLease(
 	ctx context.Context,
 ) (taskQueueState, error) {
 	db.Lock()
 	defer db.Unlock()
 
+	//Question:db.rangID=0是不是就相当于这个workflow到了另一个worker上，而这个Worker还没有这个worker的执行信息所以要去数据库中拿取
+	//[WaitForTest]
 	if db.rangeID == 0 {
+		//
 		if err := db.takeOverTaskQueueLocked(ctx); err != nil {
 			return taskQueueState{}, err
 		}
 	} else {
+		//将db里面的rangeID+1
 		if err := db.renewTaskQueueLocked(ctx, db.rangeID+1); err != nil {
 			return taskQueueState{}, err
 		}
@@ -117,6 +123,10 @@ func (db *taskQueueDB) RenewLease(
 	return taskQueueState{rangeID: db.rangeID, ackLevel: db.ackLevel}, nil
 }
 
+/**
+takeOverTaskQueueLocked 从其他TaskQueue所有者那里偷取TaskQueue
+然后将此Taskqueue的RangeID+1，
+*/
 func (db *taskQueueDB) takeOverTaskQueueLocked(
 	ctx context.Context,
 ) error {
@@ -144,6 +154,8 @@ func (db *taskQueueDB) takeOverTaskQueueLocked(
 		return nil
 
 	case *serviceerror.NotFound:
+		//其他Ower那里也没有TaskQueue，所以就需要创建TaskQueu
+		//[Question] 什么是TaskQueue的Owner呢？
 		if _, err := db.store.CreateTaskQueue(ctx, &persistence.CreateTaskQueueRequest{
 			RangeID:       initialRangeID,
 			TaskQueueInfo: db.cachedQueueInfo(),
@@ -158,6 +170,9 @@ func (db *taskQueueDB) takeOverTaskQueueLocked(
 	}
 }
 
+/**
+renewTaskQueueLocked 将db中的rangeID+1,将db中的cachedQueueInfo刷进去，修改PrevRangeID
+*/
 func (db *taskQueueDB) renewTaskQueueLocked(
 	ctx context.Context,
 	rangeID int64,
@@ -256,6 +271,7 @@ func (db *taskQueueDB) CompleteTask(
 // CompleteTasksLessThan deletes of tasks less than the given taskID. Limit is
 // the upper bound of number of tasks that can be deleted by this method. It may
 // or may not be honored
+// 解析如上,删除task_id<=limit的规定的row，返回RowsAffected
 func (db *taskQueueDB) CompleteTasksLessThan(
 	ctx context.Context,
 	exclusiveMaxTaskID int64,
@@ -297,6 +313,7 @@ func (db *taskQueueDB) getVersioningDataLocked(
 		return db.versioningData, nil
 	}
 
+	//如果不是root或者不是workflow
 	if !db.taskQueue.IsRoot() || db.taskQueue.taskType != enumspb.TASK_QUEUE_TYPE_WORKFLOW {
 		return nil, errVersioningDataNotPresentOnPartition
 	}
@@ -318,6 +335,9 @@ func (db *taskQueueDB) getVersioningDataLocked(
 // mutating function is guaranteed to be non-nil.
 //
 // On success returns a pointer to the updated data (which must not be mutated).
+// 作用如注释，需要注意的是数据库中读出versionData之后，利用mutator改变versionData，将修改后的cacheQueueInfo中的versionData，
+// 然后再刷到数据库中，如果刷库成功，将修改后的versionData赋值给db.versioningData. 也就是db.versionData才是真正可供使用的versionData
+// 如果刷到数据库里，还没有刷db.versionData就失败了，那么证明这个结点失败了，重启的时候也会恢复数据
 func (db *taskQueueDB) MutateVersioningData(ctx context.Context, mutator func(*persistencespb.VersioningData) error) (*persistencespb.VersioningData, error) {
 	if !db.taskQueue.IsRoot() || db.taskQueue.taskType != enumspb.TASK_QUEUE_TYPE_WORKFLOW {
 		return nil, errVersioningDataNoMutateNonRoot
@@ -357,7 +377,8 @@ func (db *taskQueueDB) setVersioningDataForNonRootPartition(verDat *persistences
 	db.versioningData = verDat
 }
 
-// Use this rather than calling UpdateTaskQueue directly on the store
+// updateTaskQueue Use this rather than calling UpdateTaskQueue directly on the store
+// 如果是taskQueue不是root, 将request中的VersioningData置为Nil，然后调用db.store.UpdateTaskQueue
 func (db *taskQueueDB) updateTaskQueue(
 	ctx context.Context,
 	request *persistence.UpdateTaskQueueRequest,

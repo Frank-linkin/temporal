@@ -297,6 +297,7 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskScheduledEventAsHeartbeat(
 		scheduledTime = timestamp.TimeValue(newWorkflowTaskEvent.GetEventTime())
 	}
 
+	//bookmark
 	workflowTask, err := m.ReplicateWorkflowTaskScheduledEvent(
 		m.ms.GetCurrentVersion(),
 		scheduledEventID,
@@ -329,6 +330,7 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskScheduledEvent(
 	return m.AddWorkflowTaskScheduledEventAsHeartbeat(bypassTaskGeneration, timestamp.TimePtr(m.ms.timeSource.Now()))
 }
 
+//AddFirstWorkflowTaskScheduled 根据workflow task的backoff信息，确定这是一个DelayedWorkflowTask还是普通WorkflowTask
 func (m *workflowTaskStateMachine) AddFirstWorkflowTaskScheduled(
 	startEvent *historypb.HistoryEvent,
 ) error {

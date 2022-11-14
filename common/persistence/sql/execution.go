@@ -222,6 +222,7 @@ func (m *sqlExecutionStore) createWorkflowExecutionTx(
 	return &p.InternalCreateWorkflowExecutionResponse{}, nil
 }
 
+//GetWorkflowExecution 从execution table中获取目标行，然后从其他table中把相关的信息全部拿出来
 func (m *sqlExecutionStore) GetWorkflowExecution(
 	ctx context.Context,
 	request *p.GetWorkflowExecutionRequest,

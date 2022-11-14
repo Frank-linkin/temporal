@@ -177,6 +177,7 @@ func (e *matchingEngineImpl) Stop() {
 	}
 }
 
+//getTaskQueues 将所有的taskQueueManager做成一个表
 func (e *matchingEngineImpl) getTaskQueues(maxCount int) (lists []taskQueueManager) {
 	e.taskQueuesLock.RLock()
 	defer e.taskQueuesLock.RUnlock()
@@ -204,6 +205,9 @@ func (e *matchingEngineImpl) String() string {
 // Returns taskQueueManager for a task queue. If not already cached, and create is true, tries
 // to get new range from DB and create one. This blocks (up to the context deadline) for the
 // task queue to be initialized.
+//
+// [Question]  tries to get new range from DB and create one
+//从DB中获取什么信息？
 func (e *matchingEngineImpl) getTaskQueueManager(ctx context.Context, taskQueue *taskQueueID, taskQueueKind enumspb.TaskQueueKind, create bool) (taskQueueManager, error) {
 	e.taskQueuesLock.RLock()
 	tqm, ok := e.taskQueues[*taskQueue]
@@ -241,6 +245,7 @@ func (e *matchingEngineImpl) getTaskQueueManager(ctx context.Context, taskQueue 
 }
 
 // For use in tests
+//updateTaskQueue 对TaskQueueManager进行修改
 func (e *matchingEngineImpl) updateTaskQueue(taskQueue *taskQueueID, mgr taskQueueManager) {
 	e.taskQueuesLock.Lock()
 	defer e.taskQueuesLock.Unlock()
@@ -248,6 +253,7 @@ func (e *matchingEngineImpl) updateTaskQueue(taskQueue *taskQueueID, mgr taskQue
 }
 
 // AddWorkflowTask either delivers task directly to waiting poller or save it into task queue persistence.
+// 作用如上面描述
 func (e *matchingEngineImpl) AddWorkflowTask(
 	hCtx *handlerContext,
 	addRequest *matchingservice.AddWorkflowTaskRequest,
@@ -260,7 +266,7 @@ func (e *matchingEngineImpl) AddWorkflowTask(
 	if err != nil {
 		return false, err
 	}
-
+	//[Question] What is sticky mean?
 	sticky := taskQueueKind == enumspb.TASK_QUEUE_KIND_STICKY
 	// do not load sticky task queue if it is not already loaded, which means it has no poller.
 	tqm, err := e.getTaskQueueManager(hCtx, taskQueue, taskQueueKind, !sticky)
@@ -288,7 +294,9 @@ func (e *matchingEngineImpl) AddWorkflowTask(
 		ExpiryTime:       expirationTime,
 		CreateTime:       now,
 	}
-
+	e.logger.Info("Joehanm-AddTask", tag.NewStringTag("ForwardFrom", addRequest.GetForwardedSource()),
+		tag.NewStringTag("workflowid+runid", taskInfo.GetWorkflowId()+taskInfo.GetRunId()),
+		tag.NewStringTag("source", addRequest.GetSource().String()))
 	return tqm.AddTask(hCtx.Context, addTaskParams{
 		execution:     addRequest.Execution,
 		taskInfo:      taskInfo,
@@ -298,6 +306,7 @@ func (e *matchingEngineImpl) AddWorkflowTask(
 }
 
 // AddActivityTask either delivers task directly to waiting poller or save it into task queue persistence.
+// 作用如上面的解释
 func (e *matchingEngineImpl) AddActivityTask(
 	hCtx *handlerContext,
 	addRequest *matchingservice.AddActivityTaskRequest,
@@ -348,6 +357,10 @@ func (e *matchingEngineImpl) PollWorkflowTaskQueue(
 	hCtx *handlerContext,
 	req *matchingservice.PollWorkflowTaskQueueRequest,
 ) (*matchingservice.PollWorkflowTaskQueueResponse, error) {
+	/**
+	joehanm-PollWorkflowTaskQueue
+	这里真正的PollWorkflowTaskQueue的逻辑
+	*/
 	namespaceID := namespace.ID(req.GetNamespaceId())
 	pollerID := req.GetPollerId()
 	request := req.PollRequest
@@ -607,6 +620,7 @@ func (e *matchingEngineImpl) deliverQueryResult(taskID string, queryResult *quer
 	return nil
 }
 
+//CancelOutstandingPoll 获取taskQueueManager，然后取消掉这个Poller
 func (e *matchingEngineImpl) CancelOutstandingPoll(
 	hCtx *handlerContext,
 	request *matchingservice.CancelOutstandingPollRequest,
@@ -630,6 +644,7 @@ func (e *matchingEngineImpl) CancelOutstandingPoll(
 	return nil
 }
 
+//DescribeTaskQueue 获取TaskQueueManager，调用TaskManager的DescribeTaskQueue
 func (e *matchingEngineImpl) DescribeTaskQueue(
 	hCtx *handlerContext,
 	request *matchingservice.DescribeTaskQueueRequest,
@@ -650,6 +665,7 @@ func (e *matchingEngineImpl) DescribeTaskQueue(
 	return tlMgr.DescribeTaskQueue(request.DescRequest.GetIncludeTaskQueueStatus()), nil
 }
 
+//ListTaskQueuePartitions 分别调用listTaskQueuePartitions和listTaskQueuePartitions，形成Response返回
 func (e *matchingEngineImpl) ListTaskQueuePartitions(
 	hCtx *handlerContext,
 	request *matchingservice.ListTaskQueuePartitionsRequest,
@@ -669,7 +685,9 @@ func (e *matchingEngineImpl) ListTaskQueuePartitions(
 	return &resp, nil
 }
 
+//listTaskQueuePartitions
 func (e *matchingEngineImpl) listTaskQueuePartitions(request *matchingservice.ListTaskQueuePartitionsRequest, taskQueueType enumspb.TaskQueueType) ([]*taskqueuepb.TaskQueuePartitionMetadata, error) {
+	//获取本TaskQueue所有的Partition
 	partitions, err := e.getAllPartitions(
 		namespace.Name(request.GetNamespace()),
 		*request.TaskQueue,
@@ -696,6 +714,7 @@ func (e *matchingEngineImpl) listTaskQueuePartitions(request *matchingservice.Li
 	return partitionHostInfo, nil
 }
 
+//UpdateWorkerBuildIdOrdering  调用tqMgr.MutateVersioningData修改versionData
 func (e *matchingEngineImpl) UpdateWorkerBuildIdOrdering(
 	hCtx *handlerContext,
 	req *matchingservice.UpdateWorkerBuildIdOrderingRequest,
@@ -748,6 +767,7 @@ func (e *matchingEngineImpl) GetWorkerBuildIdOrdering(
 	}, nil
 }
 
+//InvalidateTaskQueueMetadata 调用TaskQueueManager来InvalidateTaskQueueMetadata
 func (e *matchingEngineImpl) InvalidateTaskQueueMetadata(
 	hCtx *handlerContext,
 	req *matchingservice.InvalidateTaskQueueMetadataRequest,
@@ -771,6 +791,8 @@ func (e *matchingEngineImpl) InvalidateTaskQueueMetadata(
 	return &matchingservice.InvalidateTaskQueueMetadataResponse{}, nil
 }
 
+//GetTaskQueueMetadata 对比request中的versionData Hash，如果当前versionData与vdHash不一致，就把当前的versionData Hash
+//发送回去
 func (e *matchingEngineImpl) GetTaskQueueMetadata(
 	hCtx *handlerContext,
 	req *matchingservice.GetTaskQueueMetadataRequest,
@@ -843,12 +865,17 @@ func (e *matchingEngineImpl) getAllPartitions(
 }
 
 // Loads a task from persistence and wraps it in a task context
+// 解释如上
 func (e *matchingEngineImpl) getTask(
 	ctx context.Context,
 	taskQueue *taskQueueID,
 	maxDispatchPerSecond *float64,
 	taskQueueKind enumspb.TaskQueueKind,
 ) (*internalTask, error) {
+	/**
+	1.根据taskQueue，taskQueueKind获取TaskQueueManager
+	2.使用TaskQueueManager来获取Task
+	*/
 	tlMgr, err := e.getTaskQueueManager(ctx, taskQueue, taskQueueKind, true)
 	if err != nil {
 		return nil, err
@@ -856,6 +883,7 @@ func (e *matchingEngineImpl) getTask(
 	return tlMgr.GetTask(ctx, maxDispatchPerSecond)
 }
 
+//unloadTaskQueue 卸载某个TaskQueue的manager
 func (e *matchingEngineImpl) unloadTaskQueue(unloadTQM taskQueueManager) {
 	queueID := unloadTQM.QueueID()
 	e.taskQueuesLock.Lock()
@@ -874,6 +902,7 @@ func (e *matchingEngineImpl) unloadTaskQueue(unloadTQM taskQueueManager) {
 	foundTQM.Stop()
 }
 
+//updateTaskQueueGauge [question]这个需要涉及到metricClient, 所以metricsClient是干啥的
 func (e *matchingEngineImpl) updateTaskQueueGauge(countKey taskQueueCounterKey, taskQueueCount int) {
 	nsEntry, err := e.namespaceRegistry.GetNamespaceByID(countKey.namespaceID)
 	namespace := namespace.Name("unknown")
@@ -890,6 +919,7 @@ func (e *matchingEngineImpl) updateTaskQueueGauge(countKey taskQueueCounterKey, 
 }
 
 // Populate the workflow task response based on context and scheduled/started events.
+// createPollWorkflowTaskQueueResponse 将Task包装秤PollWorkflowTaskQueueResponse
 func (e *matchingEngineImpl) createPollWorkflowTaskQueueResponse(
 	task *internalTask,
 	historyResponse *historyservice.RecordWorkflowTaskStartedResponse,
@@ -935,6 +965,7 @@ func (e *matchingEngineImpl) createPollWorkflowTaskQueueResponse(
 }
 
 // Populate the activity task response based on context and scheduled/started events.
+// createPollWorkflowTaskQueueResponse 将Task包装秤PollActivityTaskQueueResponse
 func (e *matchingEngineImpl) createPollActivityTaskQueueResponse(
 	task *internalTask,
 	historyResponse *historyservice.RecordActivityTaskStartedResponse,
@@ -987,6 +1018,7 @@ func (e *matchingEngineImpl) createPollActivityTaskQueueResponse(
 	}
 }
 
+//recordWorkflowTaskStarted 调用historyClient的RecordWorkflowTaskStarted
 func (e *matchingEngineImpl) recordWorkflowTaskStarted(
 	ctx context.Context,
 	pollReq *workflowservice.PollWorkflowTaskQueueRequest,
@@ -1006,6 +1038,7 @@ func (e *matchingEngineImpl) recordWorkflowTaskStarted(
 	})
 }
 
+//recordActivityTaskStarted 调用historyClient的recordActivityTaskStarted
 func (e *matchingEngineImpl) recordActivityTaskStarted(
 	ctx context.Context,
 	pollReq *workflowservice.PollActivityTaskQueueRequest,
@@ -1025,6 +1058,11 @@ func (e *matchingEngineImpl) recordActivityTaskStarted(
 	})
 }
 
+//emitForwardedSourceStats 增加Math类型计数，共有一下4种类型：
+//1.RemoteToRemoteMatchPerTaskQueueCounter
+//2.RemoteToLocalMatchPerTaskQueueCounter
+//3.LocalToRemoteMatchPerTaskQueueCounter
+//4.LocalToLocalMatchPerTaskQueueCounter
 func (e *matchingEngineImpl) emitForwardedSourceStats(
 	scope metrics.Scope,
 	isTaskForwarded bool,

@@ -260,13 +260,17 @@ func (c *ContextImpl) LoadExecutionStats(ctx context.Context) (*persistencespb.E
 	return c.stats, nil
 }
 
+//LoadMutableState 获取当前的MutableState,具体怎么loadMutableState还没看[unsettled]
 func (c *ContextImpl) LoadMutableState(ctx context.Context) (MutableState, error) {
+	//1.首先获取namespace
 	namespaceEntry, err := c.shard.GetNamespaceRegistry().GetNamespaceByID(c.GetNamespaceID())
 	if err != nil {
 		return nil, err
 	}
 
+	//2.如果当前Context还没有mutableState,就创建一个，新的mutableState中的信息大部分由db中的覆写
 	if c.MutableState == nil {
+		//getWorkflowExecution 使用shard.Context的GetWorkflowExecution，然后更新计量
 		response, err := getWorkflowExecution(ctx, c.shard, &persistence.GetWorkflowExecutionRequest{
 			ShardID:     c.shard.GetShardID(),
 			NamespaceID: c.workflowKey.NamespaceID,
@@ -277,6 +281,7 @@ func (c *ContextImpl) LoadMutableState(ctx context.Context) (MutableState, error
 			return nil, err
 		}
 
+		//初始化MutableState的信息，个别信息从shard中获取.然后用dbRecord中的 信息覆盖newMutableState中的信息
 		c.MutableState, err = newMutableStateFromDB(
 			c.shard,
 			c.shard.GetEventsCache(),
@@ -291,7 +296,9 @@ func (c *ContextImpl) LoadMutableState(ctx context.Context) (MutableState, error
 
 		c.stats = response.State.ExecutionInfo.ExecutionStats
 	}
-
+	//3.开启当前NameSpace的transaction
+	//bookmark2022.11.11
+	//MutableState到底是用来做什么的？
 	flushBeforeReady, err := c.MutableState.StartTransaction(namespaceEntry)
 	if err != nil {
 		return nil, err
@@ -318,6 +325,10 @@ func (c *ContextImpl) LoadMutableState(ctx context.Context) (MutableState, error
 	return c.MutableState, nil
 }
 
+//PersistWorkflowEvents  PersistWorkflowEvents 根据是否第一个WorkflowEvent，
+//分别调用persistFirstWorkflowEvents和persistNonFirstWorkflowEvents persistFirstWorkflowEvents
+//内部调用shard.Context的AppendHistoryEvents，返回其结果 与上面persistFirstWorkflowEvents的区别是，
+//它的AppendHistoryNodesRequest.IsNewBranch=false
 func (c *ContextImpl) PersistWorkflowEvents(
 	ctx context.Context,
 	workflowEvents *persistence.WorkflowEvents,
@@ -325,6 +336,7 @@ func (c *ContextImpl) PersistWorkflowEvents(
 	return PersistWorkflowEvents(ctx, c.shard, workflowEvents)
 }
 
+//CreateWorkflowExecution
 func (c *ContextImpl) CreateWorkflowExecution(
 	ctx context.Context,
 	_ time.Time,
@@ -335,7 +347,7 @@ func (c *ContextImpl) CreateWorkflowExecution(
 	newWorkflow *persistence.WorkflowSnapshot,
 	newWorkflowEvents []*persistence.WorkflowEvents,
 ) (retError error) {
-
+	//[joehanm-StartWorkflowExecution]
 	defer func() {
 		if retError != nil {
 			c.Clear()
@@ -353,6 +365,7 @@ func (c *ContextImpl) CreateWorkflowExecution(
 		NewWorkflowEvents:   newWorkflowEvents,
 	}
 
+	//createWorkflowExecution 调用shard.Context的CreateWorkflowExecution,然后调用计量 shard.Context.CreateWorkflowExecution从自己ContextImpl中拿出s.ShardInfo中拿出rangeID,然后装到request， 调用executionManager.CreateWorkflowExecution
 	resp, err := createWorkflowExecution(
 		ctx,
 		c.shard,
@@ -373,6 +386,7 @@ func (c *ContextImpl) CreateWorkflowExecution(
 	return nil
 }
 
+//ConflictResolveWorkflowExecution
 func (c *ContextImpl) ConflictResolveWorkflowExecution(
 	ctx context.Context,
 	now time.Time,
@@ -484,6 +498,7 @@ func (c *ContextImpl) ConflictResolveWorkflowExecution(
 	return nil
 }
 
+//UpdateWorkflowExecutionAsActive
 func (c *ContextImpl) UpdateWorkflowExecutionAsActive(
 	ctx context.Context,
 	now time.Time,

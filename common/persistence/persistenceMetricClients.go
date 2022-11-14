@@ -681,6 +681,7 @@ func (p *taskPersistenceClient) CreateTaskQueue(
 	p.recordRequest(metrics.PersistenceCreateTaskQueueScope, caller)
 
 	sw := p.startLatencyTimer(metrics.PersistenceCreateTaskQueueScope, caller)
+	p.logger.Info("Joehanm-CreateTaskQueue:taskPersistenceClient")
 	response, err := p.persistence.CreateTaskQueue(ctx, request)
 	sw.Stop()
 

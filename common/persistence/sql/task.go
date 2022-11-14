@@ -30,6 +30,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"go.temporal.io/server/common/log/tag"
 	"math"
 
 	"github.com/dgryski/go-farm"
@@ -82,6 +83,26 @@ func (m *sqlTaskManager) CreateTaskQueue(
 	}
 	tqId, tqHash := m.taskQueueIdAndHash(nidBytes, request.TaskQueue, request.TaskType)
 
+	/**
+	[question]
+	RangeHash:    tqHash,
+	TaskQueueID:  tqId,
+	RangeID:      request.RangeID,
+	Data:         request.TaskQueueInfo.Data,
+	DataEncoding: request.TaskQueueInfo.EncodingType.String(),
+
+	上面的这一堆都是指代了什么意思？
+	namespaceID+taskQueueName,taskType,partition
+	TaskQueueID = &{
+		QualifiedTaskQueueName:/_sys/[original-name]/[partitionID]
+		namespaceID:            namespaceID,
+		taskType:               taskType,
+	}
+	RangeID:initial RangeID是1
+
+
+	*/
+	m.logger.Info("joehanm-CreateTaskQueue", tag.WorkflowTaskQueueName(request.TaskQueue))
 	row := sqlplugin.TaskQueuesRow{
 		RangeHash:    tqHash,
 		TaskQueueID:  tqId,
@@ -136,6 +157,7 @@ func (m *sqlTaskManager) GetTaskQueue(
 	}
 }
 
+//UpdateTaskQueue 更新task_queues table,更新task_queues' primary key is [RangeHash,TaskQueueID]
 func (m *sqlTaskManager) UpdateTaskQueue(
 	ctx context.Context,
 	request *persistence.InternalUpdateTaskQueueRequest,
@@ -145,6 +167,8 @@ func (m *sqlTaskManager) UpdateTaskQueue(
 		return nil, serviceerror.NewInternal(err.Error())
 	}
 
+	//生成TaskQueueID和TaskQueueHash，更新tasks列表
+	//tasks' primary key is [RangeHash,TaskQueueID]
 	tqId, tqHash := m.taskQueueIdAndHash(nidBytes, request.TaskQueue, request.TaskType)
 	var resp *persistence.UpdateTaskQueueResponse
 	err = m.txExecute(ctx, "UpdateTaskQueue", func(tx sqlplugin.Tx) error {
@@ -338,14 +362,20 @@ func (m *sqlTaskManager) DeleteTaskQueue(
 	}
 	return nil
 }
+
+//CreateTasks 生成taskQueueID和TaskQueueHash，然后将多个tasks插入到Tasks table中
 func (m *sqlTaskManager) CreateTasks(
 	ctx context.Context,
 	request *persistence.InternalCreateTasksRequest,
 ) (*persistence.CreateTasksResponse, error) {
+
+	//根据namespaceID生成一个UUID
 	nidBytes, err := primitives.ParseUUID(request.NamespaceID)
 	if err != nil {
 		return nil, serviceerror.NewUnavailable(err.Error())
 	}
+
+	//获取taskQueueId和taskQueueHash
 	tqId, tqHash := m.taskQueueIdAndHash(nidBytes, request.TaskQueue, request.TaskType)
 
 	tasksRows := make([]sqlplugin.TasksRow, len(request.Tasks))
@@ -358,6 +388,7 @@ func (m *sqlTaskManager) CreateTasks(
 			DataEncoding: v.Task.EncodingType.String(),
 		}
 	}
+	//开启事务，将Tasks插入task_queue表
 	var resp *persistence.CreateTasksResponse
 	err = m.txExecute(ctx, "CreateTasks", func(tx sqlplugin.Tx) error {
 		if _, err1 := tx.InsertIntoTasks(ctx, tasksRows); err1 != nil {
@@ -452,6 +483,7 @@ func (m *sqlTaskManager) CompleteTask(
 	return nil
 }
 
+//CompleteTasksLessThan 删除task_id<=limit的规定的row，返回RowsAffected
 func (m *sqlTaskManager) CompleteTasksLessThan(
 	ctx context.Context,
 	request *persistence.CompleteTasksLessThanRequest,
@@ -478,6 +510,8 @@ func (m *sqlTaskManager) CompleteTasksLessThan(
 }
 
 // Returns uint32 hash for a particular TaskQueue/Task given a Namespace, TaskQueueName and TaskQueueType
+//生成taskQueueID和TaskQueueHash
+//其实TaskQueueHash就是TaskQueueID进行hash一下
 func (m *sqlTaskManager) taskQueueIdAndHash(
 	namespaceID primitives.UUID,
 	name string,
@@ -487,6 +521,10 @@ func (m *sqlTaskManager) taskQueueIdAndHash(
 	return id, farm.Fingerprint32(id)
 }
 
+/**
+生成taskQueueId
+规则是namespaceID+name+taskType
+*/
 func (m *sqlTaskManager) taskQueueId(
 	namespaceID primitives.UUID,
 	name string,

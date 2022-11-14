@@ -186,6 +186,7 @@ func (h *Handler) isStopped() bool {
 }
 
 // Check is from: https://github.com/grpc/grpc/blob/master/doc/health-checking.md
+// 使用waitGroup等待Check History server status
 func (h *Handler) Check(_ context.Context, request *healthpb.HealthCheckRequest) (*healthpb.HealthCheckResponse, error) {
 	h.logger.Debug("History service health check endpoint (gRPC) reached.")
 
@@ -236,7 +237,7 @@ func (h *Handler) RecordActivityTaskHeartbeat(ctx context.Context, request *hist
 	if err != nil {
 		return nil, h.convertError(err)
 	}
-
+	//bookmark
 	response, err2 := engine.RecordActivityTaskHeartbeat(ctx, request)
 	if err2 != nil {
 		return nil, h.convertError(err2)
@@ -528,6 +529,13 @@ func (h *Handler) RespondWorkflowTaskFailed(ctx context.Context, request *histor
 
 // StartWorkflowExecution - creates a new workflow execution
 func (h *Handler) StartWorkflowExecution(ctx context.Context, request *historyservice.StartWorkflowExecutionRequest) (_ *historyservice.StartWorkflowExecutionResponse, retError error) {
+	//[joehanm-StartWorkflowExecution]
+	/*
+		1.根据namespaceID,WorkflowID获取shard信息
+		2.从shard获取对应的engine,engine来执行StartWorkflowExecution
+		3.[unknown]从Context里面获取一个VectorClock，附着到Response里面
+	*/
+
 	defer log.CapturePanic(h.logger, &retError)
 	h.startWG.Wait()
 
@@ -551,6 +559,7 @@ func (h *Handler) StartWorkflowExecution(ctx context.Context, request *historyse
 	if err != nil {
 		return nil, h.convertError(err)
 	}
+	//[joehanm-unknown-这个NewVectorClock是做什么的？注意到是个Vector]
 	response.Clock, err = shardContext.NewVectorClock()
 	if err != nil {
 		return nil, h.convertError(err)
@@ -1254,6 +1263,12 @@ func (h *Handler) VerifyChildExecutionCompletionRecorded(
 // Volatile information are the information related to client, such as:
 // 1. StickyTaskQueue
 // 2. StickyScheduleToStartTimeout
+//Invoke 获取workflowContext，从workflowContext中获取mutableState，调用ClearStickyness，重置mutableState中的
+//stickyTaskQueue的状态。
+//调用的GetAndUpdateWorkflowWithNew是个框，而invoke()这一层就提供了修改的function
+//
+//GetAndUpdateWorkflowWithNew 使用workflowConsistencyChecker获取WorkflowContext,然后调用UpdateWorkflowWithNew
+//感觉这个API.GetAndUpdateWorkflowWithNew是一个框，它从参数接受，待修改的object，修改的funciton，然后它就是对object执行这个function
 func (h *Handler) ResetStickyTaskQueue(ctx context.Context, request *historyservice.ResetStickyTaskQueueRequest) (_ *historyservice.ResetStickyTaskQueueResponse, retError error) {
 
 	defer log.CapturePanic(h.logger, &retError)
@@ -1269,6 +1284,7 @@ func (h *Handler) ResetStickyTaskQueue(ctx context.Context, request *historyserv
 	}
 
 	workflowID := request.Execution.GetWorkflowId()
+
 	shardContext, err := h.controller.GetShardByNamespaceWorkflow(namespaceID, workflowID)
 	if err != nil {
 		return nil, h.convertError(err)
@@ -1314,7 +1330,6 @@ func (h *Handler) ReplicateEventsV2(ctx context.Context, request *historyservice
 	if err != nil {
 		return nil, h.convertError(err)
 	}
-
 	err2 := engine.ReplicateEventsV2(ctx, request)
 	if err2 != nil {
 		return nil, h.convertError(err2)

@@ -653,6 +653,8 @@ func (s *ContextImpl) AddTasks(
 	return err
 }
 
+//CreateWorkflowExecution 从自己ContextImpl中拿出s.ShardInfo中拿出rangeID,然后装到request，
+//调用executionManager.CreateWorkflowExecution
 func (s *ContextImpl) CreateWorkflowExecution(
 	ctx context.Context,
 	request *persistence.CreateWorkflowExecutionRequest,
@@ -1115,6 +1117,7 @@ func (s *ContextImpl) GetThrottledLogger() log.Logger {
 	return s.throttledLogger
 }
 
+//getRangeIDLocked context.Impl里面的shardInfo里获取rangID
 func (s *ContextImpl) getRangeIDLocked() int64 {
 	return s.shardInfo.GetRangeId()
 }

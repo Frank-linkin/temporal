@@ -35,6 +35,12 @@ import (
 	"go.temporal.io/server/service/history/shard"
 )
 
+//Invoke 获取workflowContext，从workflowContext中获取mutableState，调用ClearStickyness，重置mutableState中的
+//stickyTaskQueue的状态。
+//调用的GetAndUpdateWorkflowWithNew是个框，而invoke()这一层就提供了修改的function
+//
+//GetAndUpdateWorkflowWithNew 使用workflowConsistencyChecker获取WorkflowContext,然后调用UpdateWorkflowWithNew
+//感觉这个API.GetAndUpdateWorkflowWithNew是一个框，它从参数接受，待修改的object，修改的funciton，然后它就是对object执行这个function
 func Invoke(
 	ctx context.Context,
 	resetRequest *historyservice.ResetStickyTaskQueueRequest,

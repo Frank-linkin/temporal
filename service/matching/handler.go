@@ -236,6 +236,10 @@ func (h *Handler) PollWorkflowTaskQueue(
 	ctx context.Context,
 	request *matchingservice.PollWorkflowTaskQueueRequest,
 ) (_ *matchingservice.PollWorkflowTaskQueueResponse, retError error) {
+	/*
+		joehanm-PollWorkflowTaskQueue
+		这里响应了API Call
+	*/
 	defer log.CapturePanic(h.logger, &retError)
 	hCtx := h.newHandlerContext(
 		ctx,
@@ -408,6 +412,8 @@ func (h *Handler) InvalidateTaskQueueMetadata(
 	return h.engine.InvalidateTaskQueueMetadata(hCtx, request)
 }
 
+//GetTaskQueueMetadata 对比request中的versionData Hash，如果当前versionData与vdHash不一致，就把当前的versionData Hash
+//发送回去
 func (h *Handler) GetTaskQueueMetadata(
 	ctx context.Context,
 	request *matchingservice.GetTaskQueueMetadataRequest,

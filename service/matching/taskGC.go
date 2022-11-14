@@ -69,15 +69,19 @@ func (tgc *taskGC) RunNow(ctx context.Context, ackLevel int64) {
 	tgc.tryDeleteNextBatch(ctx, ackLevel, true)
 }
 
+//tryDeleteNextBatch 尝试删除数据库中已经acked的rows，删除成功就调整tgc.ackLevel
 func (tgc *taskGC) tryDeleteNextBatch(ctx context.Context, ackLevel int64, ignoreTimeCond bool) {
+	//尝试给taskGC加锁，不成功则返回（代表一个GC routine正在执行）
 	if !tgc.tryLock() {
 		return
 	}
 	defer tgc.unlock()
+	//检查是否需要清理，
 	batchSize := tgc.config.MaxTaskDeleteBatchSize()
 	if !tgc.checkPrecond(ackLevel, batchSize, ignoreTimeCond) {
 		return
 	}
+	//进行清理。
 	tgc.lastDeleteTime = time.Now().UTC()
 	n, err := tgc.db.CompleteTasksLessThan(ctx, ackLevel+1, batchSize)
 	if err != nil {
@@ -89,15 +93,20 @@ func (tgc *taskGC) tryDeleteNextBatch(ctx context.Context, ackLevel int64, ignor
 	// if we get UnknownNumRowsAffected or a smaller number than our limit, we know we got
 	// everything <= ackLevel, so we can reset ours. if not, we may have to try again.
 	if n == persistence.UnknownNumRowsAffected || n < batchSize {
+		//重置tgc.ackLevel
 		tgc.ackLevel = ackLevel
 	}
 }
 
+//checkPrecond 检查是否需要清理。
+//检查尚未清理的task数据是否够一个backSize,如果够，直接返回true，如果有尚未清理的，那么返回 ignoreTimeCond||到达清理时间间隔
 func (tgc *taskGC) checkPrecond(ackLevel int64, batchSize int, ignoreTimeCond bool) bool {
+	//检查尚未清理的task数据是否够一个backSize,如果够，直接返回true
 	backlog := ackLevel - tgc.ackLevel
 	if backlog >= int64(batchSize) {
 		return true
 	}
+	//如果有尚未清理的，那么返回 ignoreTimeCond||到达清理时间间隔
 	return backlog > 0 && (ignoreTimeCond || time.Now().UTC().Sub(tgc.lastDeleteTime) > maxTimeBetweenTaskDeletes)
 }
 

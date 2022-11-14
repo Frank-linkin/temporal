@@ -81,11 +81,15 @@ func (m *executionManagerImpl) GetName() string {
 
 // The below three APIs are related to serialization/deserialization
 
+// CreateWorkflowExecution 调用executionStore向History_Node table插入一条数据
 func (m *executionManagerImpl) CreateWorkflowExecution(
 	ctx context.Context,
 	request *CreateWorkflowExecutionRequest,
 ) (*CreateWorkflowExecutionResponse, error) {
-
+	//joehanm-StartWorkflowExecution
+	/*
+		这里要正式落盘了
+	*/
 	newSnapshot := request.NewWorkflowSnapshot
 	newWorkflowNewEvents, newHistoryDiff, err := m.serializeWorkflowEventBatches(ctx, request.ShardID, request.NewWorkflowEvents)
 	if err != nil {

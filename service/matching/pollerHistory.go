@@ -46,6 +46,7 @@ type (
 	}
 )
 
+//pollerHistory 其实就是获取poller的信息的Cache，给每个poller一个identity。而poller信息只有一个ratePerSecond
 type pollerHistory struct {
 	// poller ID -> pollerInfo
 	// pollers map[pollerID]pollerInfo
@@ -60,10 +61,12 @@ func newPollerHistory() *pollerHistory {
 	}
 
 	return &pollerHistory{
+		//Cache 是一个LRU的结构
 		history: cache.New(pollerHistoryInitMaxSize, opts),
 	}
 }
 
+//updatePollerInfo 有就修改，没有就创建一个PollerInfo pollers.history.Put
 func (pollers *pollerHistory) updatePollerInfo(id pollerIdentity, ratePerSecond *float64) {
 	rps := defaultTaskDispatchRPS
 	if ratePerSecond != nil {
@@ -72,6 +75,7 @@ func (pollers *pollerHistory) updatePollerInfo(id pollerIdentity, ratePerSecond 
 	pollers.history.Put(id, &pollerInfo{ratePerSecond: rps})
 }
 
+//getPollerInfo 遍历所有的Poller，找到lastAccessTime>earliestAccessTime的结点
 func (pollers *pollerHistory) getPollerInfo(earliestAccessTime time.Time) []*taskqueuepb.PollerInfo {
 	var result []*taskqueuepb.PollerInfo
 

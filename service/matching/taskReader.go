@@ -104,6 +104,7 @@ func (tr *taskReader) Stop() {
 	tr.gorogrp.Cancel()
 }
 
+//Signal 向tr.notifyC装入一个数据（数据是空的）
 func (tr *taskReader) Signal() {
 	var event struct{}
 	select {
@@ -118,20 +119,25 @@ func (tr *taskReader) dispatchBufferedTasks(ctx context.Context) error {
 dispatchLoop:
 	for {
 		select {
+		//The boolean variable ok returned by a receive operator indicates whether the received value was sent on the channel (true) or is a zero value returned because the channel is closed and empty (false).
+		//从taskBuffer中取出一个task。
 		case taskInfo, ok := <-tr.taskBuffer:
 			if !ok { // Task queue getTasks pump is shutdown
+				//tr.taskBuffer已经被关闭了，退出循环
 				break dispatchLoop
 			}
 			task := newInternalTask(taskInfo, tr.tlMgr.completeTask, enumsspb.TASK_SOURCE_DB_BACKLOG, "", false)
 			for {
 				// We checked if the task was expired before putting it in the buffer, but it
 				// might have expired while it sat in the buffer, so we should check again.
+				// 从buffer中取出来的时候有没有过期，过期就增加ExpiredTasksPerTaskQueueCounter
 				if taskqueue.IsTaskExpired(taskInfo) {
 					task.finish(nil)
 					tr.scope().IncCounter(metrics.ExpiredTasksPerTaskQueueCounter)
 					// Don't try to set read level here because it may have been advanced already.
 					break
 				}
+				//尝试把这个task分配给poller,没有poller就一直阻塞
 				err := tr.tlMgr.DispatchTask(ctx, task)
 				if err == nil {
 					break
@@ -156,10 +162,12 @@ dispatchLoop:
 func (tr *taskReader) getTasksPump(ctx context.Context) error {
 	ctx = tr.initContext(ctx)
 
+	//等待taskQueueManager初始化成功
 	if err := tr.tlMgr.WaitUntilInitialized(ctx); err != nil {
 		return err
 	}
 
+	//UpdateAckInterval是啥？ ANSWER:更新AckManager的时间间隔
 	updateAckTimer := time.NewTimer(tr.tlMgr.config.UpdateAckInterval())
 	defer updateAckTimer.Stop()
 
@@ -189,6 +197,7 @@ Loop:
 				}
 				continue Loop
 			}
+
 			tr.retrier.Reset()
 
 			if len(tasks) == 0 {
@@ -220,6 +229,7 @@ Loop:
 	}
 }
 
+//getTaskBatchWithRange 从数据库中读取readLevel-maxReadLevel的task
 func (tr *taskReader) getTaskBatchWithRange(
 	ctx context.Context,
 	readLevel int64,
@@ -235,9 +245,12 @@ func (tr *taskReader) getTaskBatchWithRange(
 // Returns a batch of tasks from persistence starting form current read level.
 // Also return a number that can be used to update readLevel
 // Also return a bool to indicate whether read is finished
+// getTaskBatch
 func (tr *taskReader) getTaskBatch(ctx context.Context) ([]*persistencespb.AllocatedTaskInfo, int64, bool, error) {
 	var tasks []*persistencespb.AllocatedTaskInfo
+	//ackManager.ReadLevel: Maximum TaskID inserted into outstandingTasks,也就是已经从数据库读出的taskID的位置
 	readLevel := tr.tlMgr.taskAckManager.getReadLevel()
+	//修改maxReadLevel，表示当前最大落盘的taskID
 	maxReadLevel := tr.tlMgr.taskWriter.GetMaxReadLevel()
 
 	// counter i is used to break and let caller check whether taskqueue is still alive and need resume read.
@@ -278,11 +291,14 @@ func (tr *taskReader) addTasksToBuffer(
 	return nil
 }
 
+//addSingleTaskToBuffer
 func (tr *taskReader) addSingleTaskToBuffer(
 	ctx context.Context,
 	task *persistencespb.AllocatedTaskInfo,
 ) error {
+	// 将Task插入到taskAckManager的outstandingTasks中
 	tr.tlMgr.taskAckManager.addTask(task.GetTaskId())
+	// 然后将task装入tr.taskBuffer中
 	select {
 	case tr.taskBuffer <- task:
 		return nil

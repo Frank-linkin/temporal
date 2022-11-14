@@ -33,6 +33,8 @@ import (
 	"go.temporal.io/server/service/history/workflow"
 )
 
+//GetAndUpdateWorkflowWithNew 使用workflowConsistencyChecker获取WorkflowContext,然后调用UpdateWorkflowWithNew
+//感觉这个API.GetAndUpdateWorkflowWithNew是一个框，它从参数接受，待修改的object，修改的funciton，然后它就是对object执行这个function
 func GetAndUpdateWorkflowWithNew(
 	ctx context.Context,
 	reqClock *clockspb.VectorClock,
@@ -57,6 +59,7 @@ func GetAndUpdateWorkflowWithNew(
 	return UpdateWorkflowWithNew(shard, ctx, workflowContext, action, newWorkflowFn)
 }
 
+//UpdateWorkflowWithNew 看样子就是对workflow的update
 func UpdateWorkflowWithNew(
 	shard shard.Context,
 	ctx context.Context,

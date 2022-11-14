@@ -181,6 +181,11 @@ func WorkflowTaskTimeout(s *time.Duration) ZapTag {
 	return NewDurationPtrTag("workflow-task-timeout", s)
 }
 
+//forwardFrom
+func ForwardSource(source string) ZapTag {
+	return NewStringTag("ForwardFrom", source)
+}
+
 // QueryID returns tag for QueryID
 func QueryID(queryID string) ZapTag {
 	return NewStringTag("query-id", queryID)

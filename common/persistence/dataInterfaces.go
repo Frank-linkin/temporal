@@ -1117,10 +1117,13 @@ type (
 		Closeable
 		GetName() string
 		CreateTaskQueue(ctx context.Context, request *CreateTaskQueueRequest) (*CreateTaskQueueResponse, error)
+		//UpdateTaskQueue 将taskQueueInfo序列化成taskQueueInfoBlob，插入Task_queues table中
 		UpdateTaskQueue(ctx context.Context, request *UpdateTaskQueueRequest) (*UpdateTaskQueueResponse, error)
 		GetTaskQueue(ctx context.Context, request *GetTaskQueueRequest) (*GetTaskQueueResponse, error)
 		ListTaskQueue(ctx context.Context, request *ListTaskQueueRequest) (*ListTaskQueueResponse, error)
 		DeleteTaskQueue(ctx context.Context, request *DeleteTaskQueueRequest) error
+		//CreateTasks 将CacheQueueInfo做成taskQueueInfoBlob,将TaskInfo做成Blob,每个Task的ExpiryTime就是TaskQueue的ExpiryTime
+		//TaskManager请求CreateTask，tasks信息更新到数据库tasks表中（MySql并没有用到taskQueueInfoBlob）
 		CreateTasks(ctx context.Context, request *CreateTasksRequest) (*CreateTasksResponse, error)
 		GetTasks(ctx context.Context, request *GetTasksRequest) (*GetTasksResponse, error)
 		CompleteTask(ctx context.Context, request *CompleteTaskRequest) error

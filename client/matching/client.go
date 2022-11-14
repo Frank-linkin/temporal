@@ -152,6 +152,12 @@ func (c *clientImpl) PollWorkflowTaskQueue(
 	ctx context.Context,
 	request *matchingservice.PollWorkflowTaskQueueRequest,
 	opts ...grpc.CallOption) (*matchingservice.PollWorkflowTaskQueueResponse, error) {
+	//joehanm-PollWorkflowTaskQueue
+	/*
+		1.经过负载均衡选择合适的partition
+		2.根据namespace,TaskQueue选择合适的client joehanm-TODO:这里个为什么要选择Client?
+		3.然后通过这个Client开始PollWorkflowTaskQueue
+	*/
 	partition := c.loadBalancer.PickReadPartition(
 		namespace.ID(request.GetNamespaceId()),
 		*request.PollRequest.GetTaskQueue(),

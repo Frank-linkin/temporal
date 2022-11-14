@@ -199,6 +199,7 @@ func (mdb *db) UpdateExecutions(
 }
 
 // SelectFromExecutions reads a single row from executions table
+// 从execution table中获取目标行
 func (mdb *db) SelectFromExecutions(
 	ctx context.Context,
 	filter sqlplugin.ExecutionsFilter,

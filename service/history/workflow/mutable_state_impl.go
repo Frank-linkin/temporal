@@ -183,6 +183,7 @@ type (
 
 var _ MutableState = (*MutableStateImpl)(nil)
 
+//NewMutableState 初始化MutableState的信息，个别信息从shard中获取
 func NewMutableState(
 	shard shard.Context,
 	eventsCache events.Cache,
@@ -269,6 +270,8 @@ func NewMutableState(
 	return s
 }
 
+//newMutableStateFromDB 初始化MutableState的信息，个别信息从shard中获取.然后用dbRecord中的
+//信息覆盖newMutableState中的信息
 func newMutableStateFromDB(
 	shard shard.Context,
 	eventsCache events.Cache,
@@ -280,6 +283,7 @@ func newMutableStateFromDB(
 
 	// startTime will be overridden by DB record
 	startTime := time.Time{}
+	//NewMutableState 初始化MutableState的信息，个别信息从shard中获取
 	mutableState := NewMutableState(shard, eventsCache, logger, namespaceEntry, startTime)
 
 	if dbRecord.ActivityInfos != nil {
@@ -641,7 +645,7 @@ func (e *MutableStateImpl) GetActivityScheduledEvent(
 func (e *MutableStateImpl) GetActivityInfo(
 	scheduledEventID int64,
 ) (*persistencespb.ActivityInfo, bool) {
-
+	//也就是说pending代表正在执行的Activity的信息
 	ai, ok := e.pendingActivityInfoIDs[scheduledEventID]
 	return ai, ok
 }
@@ -1023,6 +1027,8 @@ func (e *MutableStateImpl) HasParentExecution() bool {
 	return e.executionInfo.ParentNamespaceId != "" && e.executionInfo.ParentWorkflowId != ""
 }
 
+//UpdateActivityProgress 修改该ActivityInfo的Version，LastHeartbeatDetails，LastHeartbeatUpdateTime，然后将ActivityInfo放入
+//updateActivityInfos(map),记录syncActivityTasks[]
 func (e *MutableStateImpl) UpdateActivityProgress(
 	ai *persistencespb.ActivityInfo,
 	request *workflowservice.RecordActivityTaskHeartbeatRequest,

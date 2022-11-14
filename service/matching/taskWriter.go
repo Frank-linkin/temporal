@@ -133,18 +133,23 @@ func (w *taskWriter) initReadWriteState(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	w.taskIDBlock = rangeIDToTaskIDBlock(state.rangeID, w.config.RangeSize)
 	atomic.StoreInt64(&w.maxReadLevel, w.taskIDBlock.start-1)
+	//[QUESTION] 什么是Ack_Level
 	w.tlMgr.taskAckManager.setAckLevel(state.ackLevel)
 	return nil
 }
 
+//appendTask 检测writeLoop有没有停止，没有停止的话将task写入w.appendCh中，
+//待writeLoop落盘成功后，会返回Response，记录TaskWriteLatencyPerTaskQueue的计量
 func (w *taskWriter) appendTask(
 	execution *commonpb.WorkflowExecution,
 	taskInfo *persistencespb.TaskInfo,
 ) (*persistence.CreateTasksResponse, error) {
 
 	select {
+	//查看writeLoop是不是已经停止
 	case <-w.writeLoop.Done():
 		return nil, errShutdown
 	default:
@@ -161,16 +166,20 @@ func (w *taskWriter) appendTask(
 
 	select {
 	case w.appendCh <- req:
+		//写入队列成功
 		select {
 		case r := <-ch:
+			//计算TaskWrite的Latency
 			w.tlMgr.metricScope.RecordTimer(metrics.TaskWriteLatencyPerTaskQueue, time.Since(startTime))
 			return r.persistenceResponse, r.err
 		case <-w.writeLoop.Done():
+			//如果写入还没有完成的时候writeLoop就停止了
 			// if we are shutting down, this request will never make
 			// it to cassandra, just bail out and fail this request
 			return nil, errShutdown
 		}
 	default: // channel is full, throttle
+		//如果队列已满，throttle,return error
 		w.tlMgr.metricScope.IncCounter(metrics.TaskWriteThrottlePerTaskQueueCounter)
 		return nil, serviceerror.NewResourceExhausted(
 			enumspb.RESOURCE_EXHAUSTED_CAUSE_SYSTEM_OVERLOADED,
@@ -182,7 +191,10 @@ func (w *taskWriter) GetMaxReadLevel() int64 {
 	return atomic.LoadInt64(&w.maxReadLevel)
 }
 
+//分配count个taskID，如果taskID不够了，就进行扩容
 func (w *taskWriter) allocTaskIDs(ctx context.Context, count int) ([]int64, error) {
+	//这里的count就是batch的大小
+	//taskIDBlock有点在磁盘上顺序写入文件的味道
 	result := make([]int64, count)
 	for i := 0; i < count; i++ {
 		if w.taskIDBlock.start > w.taskIDBlock.end {
@@ -191,6 +203,7 @@ func (w *taskWriter) allocTaskIDs(ctx context.Context, count int) ([]int64, erro
 			if err != nil {
 				return nil, err
 			}
+			//w.taskIDBlock就是现在正在使用的taskIDBlock
 			w.taskIDBlock = newBlock
 		}
 		result[i] = w.taskIDBlock.start
@@ -199,6 +212,7 @@ func (w *taskWriter) allocTaskIDs(ctx context.Context, count int) ([]int64, erro
 	return result, nil
 }
 
+//appendTasks 调用TaskQueueManager的DB将tasks全部写入数据库的taskQueue当中
 func (w *taskWriter) appendTasks(
 	ctx context.Context,
 	tasks []*persistencespb.AllocatedTaskInfo,
@@ -217,6 +231,10 @@ func (w *taskWriter) appendTasks(
 	return resp, nil
 }
 
+//taskWriterLoop 开始时候，初始化状态
+//然后不停地执行以下WriterLoop：
+//		1.从w.appendCh中取出一批Tasks，分配给每个Task一个TaskID后，将每个Task写入到数据库中
+//		2.ctx时间结束，结束Loop
 func (w *taskWriter) taskWriterLoop(ctx context.Context) error {
 	err := w.initReadWriteState(ctx)
 	w.tlMgr.initializedError.Set(struct{}{}, err)
@@ -226,9 +244,15 @@ func (w *taskWriter) taskWriterLoop(ctx context.Context) error {
 		return err
 	}
 writerLoop:
+	/**
+	若：
+		1.从w.appendCh中取出一批Tasks，分配给每个Task一个TaskID后，将每个Task写入到数据库中
+		2.ctx时间结束，结束Loop
+	*/
 	for {
 		select {
 		case request := <-w.appendCh:
+			//接到了一个请求，就写入一批Request
 			// read a batch of requests from the channel
 			reqs := []*writeTaskRequest{request}
 			reqs = w.getWriteBatch(reqs)
@@ -243,6 +267,7 @@ writerLoop:
 			}
 
 			var tasks []*persistencespb.AllocatedTaskInfo
+			//给每个task标识上taskID
 			for i, req := range reqs {
 				tasks = append(tasks, &persistencespb.AllocatedTaskInfo{
 					TaskId: taskIDs[i],
@@ -252,8 +277,10 @@ writerLoop:
 			}
 
 			resp, err := w.appendTasks(ctx, tasks)
+			//通知哪些Request，他们的Tasks落盘成功
 			w.sendWriteResponse(reqs, resp, err)
 			// Update the maxReadLevel after the writes are completed.
+			//修改maxReadLevel，表示当前最大落盘的taskID
 			if maxReadLevel > 0 {
 				atomic.StoreInt64(&w.maxReadLevel, maxReadLevel)
 			}
@@ -277,6 +304,7 @@ readLoop:
 	return reqs
 }
 
+//sendWriteResponse 对于每个writeTaskRequest，都通过其Ch一个Reponse
 func (w *taskWriter) sendWriteResponse(
 	reqs []*writeTaskRequest,
 	persistenceResponse *persistence.CreateTasksResponse,
@@ -292,6 +320,7 @@ func (w *taskWriter) sendWriteResponse(
 	}
 }
 
+//renewLeaseWithRetry 尝试将RangID+1。有RangeID直接+1，没有RangID偷一个+1
 func (w *taskWriter) renewLeaseWithRetry(
 	ctx context.Context,
 	retryPolicy backoff.RetryPolicy,
@@ -302,7 +331,9 @@ func (w *taskWriter) renewLeaseWithRetry(
 		newState, err = w.idAlloc.RenewLease(ctx)
 		return
 	}
+	//增加LeaseRequestPerTaskQueue的技术
 	w.tlMgr.metricScope.IncCounter(metrics.LeaseRequestPerTaskQueueCounter)
+
 	err := backoff.ThrottleRetryContext(ctx, op, retryPolicy, retryErrors)
 	if err != nil {
 		w.tlMgr.metricScope.IncCounter(metrics.LeaseFailurePerTaskQueueCounter)
@@ -311,7 +342,11 @@ func (w *taskWriter) renewLeaseWithRetry(
 	return newState, nil
 }
 
+/**
+调用renewLeaseWithRetry将rangeID+1,然后将rangeID翻译成taskIDBlock(也就是TaskID的范围)
+*/
 func (w *taskWriter) allocTaskIDBlock(ctx context.Context, prevBlockEnd int64) (taskIDBlock, error) {
+	//所以RangeID其实是块号，从1开始的
 	currBlock := rangeIDToTaskIDBlock(w.idAlloc.RangeID(), w.config.RangeSize)
 	if currBlock.end != prevBlockEnd {
 		return taskIDBlock{},

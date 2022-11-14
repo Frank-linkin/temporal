@@ -61,6 +61,12 @@ func NewWorkflowWithSignal(
 	startRequest *historyservice.StartWorkflowExecutionRequest,
 	signalWithStartRequest *workflowservice.SignalWithStartWorkflowExecutionRequest,
 ) (WorkflowContext, error) {
+	//[joehanm-startWorkflowExecution]
+	/**
+	1.创建一个新的MutableState,给MutableState添加WorkflowExecutionStartedEvent
+	2.创建第一个WorkflowTask
+	3.
+	*/
 	newMutableState, err := CreateMutableState(ctx, shard, namespaceEntry, runID)
 	if err != nil {
 		return nil, err

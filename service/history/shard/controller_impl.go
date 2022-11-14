@@ -160,6 +160,7 @@ func (c *ControllerImpl) GetShardByNamespaceWorkflow(
 	namespaceID namespace.ID,
 	workflowID string,
 ) (Context, error) {
+	//amespaceID-workflowID 哈希之后%numberOfShard的到shardID
 	shardID := c.config.GetShardID(namespaceID, workflowID)
 	return c.GetShardByID(shardID)
 }
@@ -208,6 +209,7 @@ func (c *ControllerImpl) shardClosedCallback(shard *ContextImpl) {
 // if necessary. If a shard context is created, it will initialize in the background.
 // This function won't block on rangeid lease acquisition.
 func (c *ControllerImpl) getOrCreateShardContext(shardID int32) (*ContextImpl, error) {
+	// 查看historyShards里面有没有historyShardContext,有个话直接返回
 	c.RLock()
 	if shard, ok := c.historyShards[shardID]; ok {
 		if shard.isValid() {
@@ -217,7 +219,8 @@ func (c *ControllerImpl) getOrCreateShardContext(shardID int32) (*ContextImpl, e
 		// if shard not valid then proceed to create a new one
 	}
 	c.RUnlock()
-
+	// [Question] 这一步获取Owner是什么？获取master?
+	// 如果当前机器是owener，就会执行创建context的操作，如果不是owner，就ShardOwnershipLost?
 	ownerInfo, err := c.historyServiceResolver.Lookup(convert.Int32ToString(shardID))
 	if err != nil {
 		return nil, err
@@ -306,6 +309,7 @@ func (c *ControllerImpl) removeShard(shardID int32, expected *ContextImpl) (*Con
 //	a. Ring membership change
 //	b. Periodic ticker
 //	c. ShardOwnershipLostError and subsequent ShardClosedEvents from engine
+// [Question] Controller的主要功能，那这个的含义是什么
 func (c *ControllerImpl) shardManagementPump() {
 	defer c.shutdownWG.Done()
 

@@ -49,16 +49,19 @@ func Invoke(
 	}
 
 	request := req.HeartbeatRequest
+	// 将request中传来的task信息解码
 	tokenSerializer := common.NewProtoTaskTokenSerializer()
 	token, err0 := tokenSerializer.Deserialize(request.TaskToken)
 	if err0 != nil {
 		return nil, consts.ErrDeserializingToken
 	}
+
 	if err := api.SetActivityTaskRunID(ctx, token, workflowConsistencyChecker); err != nil {
 		return nil, err
 	}
 
 	var cancelRequested bool
+
 	err = api.GetAndUpdateWorkflowWithNew(
 		ctx,
 		token.Clock,
@@ -81,6 +84,7 @@ func Invoke(
 					return nil, err0
 				}
 			}
+			//从pendingActivityInfoIDs 这个map中获取activity的信息
 			ai, isRunning := mutableState.GetActivityInfo(scheduledEventID)
 
 			// First check to see if cache needs to be refreshed as we could potentially have stale workflow execution in
@@ -98,6 +102,7 @@ func Invoke(
 			cancelRequested = ai.CancelRequested
 
 			// Save progress and last HB reported time.
+			//修改前面ActivityInfo的Version，LastHeartbeatDetails，LastHeartbeatUpdateTime
 			mutableState.UpdateActivityProgress(ai, request)
 
 			return &api.UpdateWorkflowAction{

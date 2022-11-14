@@ -46,6 +46,7 @@ import (
 type (
 	MutableStateConsistencyPredicate func(mutableState workflow.MutableState) bool
 
+	// WorkflowConsistencyChecker 目前看起来是获取runid和context的
 	WorkflowConsistencyChecker interface {
 		GetCurrentRunID(
 			ctx context.Context,

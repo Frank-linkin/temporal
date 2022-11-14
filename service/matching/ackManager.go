@@ -41,8 +41,9 @@ type ackManager struct {
 	outstandingTasks map[int64]bool // key->TaskID, value->(true for acked, false->for non acked)
 	readLevel        int64          // Maximum TaskID inserted into outstandingTasks
 	ackLevel         int64          // Maximum TaskID below which all tasks are acked
-	backlogCounter   atomic.Int64
-	logger           log.Logger
+	//这个好像是acked的task的计数
+	backlogCounter atomic.Int64
+	logger         log.Logger
 }
 
 func newAckManager(logger log.Logger) ackManager {
@@ -50,6 +51,8 @@ func newAckManager(logger log.Logger) ackManager {
 }
 
 // Registers task as in-flight and moves read level to it. Tasks can be added in increasing order of taskID only.
+// 向m.outstandingTasks加入一个taskID,如果taskID<m.readLevel(Maximum TaskID inserted into outstandingTasks),即
+//outstandingTasks中taskID的最大值或者已经在outstandingTasks中，那么报错；否则，插入到outstandingTasks中，初始为false
 func (m *ackManager) addTask(taskID int64) {
 	m.Lock()
 	defer m.Unlock()
@@ -112,6 +115,8 @@ func (m *ackManager) setAckLevel(ackLevel int64) {
 	}
 }
 
+//completeTask 如果taskID在outstandingQueue里，那么就把它置为true，让backlogCount-1
+//然后给outstandingTasks中的TaskID排序，删除目前已经完成taskID，m.ackLevel自然向上提，返回最后的ackLevel
 func (m *ackManager) completeTask(taskID int64) (ackLevel int64) {
 	m.Lock()
 	defer m.Unlock()
@@ -138,6 +143,7 @@ func (m *ackManager) completeTask(taskID int64) (ackLevel int64) {
 	return m.ackLevel
 }
 
+//getBacklogCountHint 获取backlogCounter的计数
 func (m *ackManager) getBacklogCountHint() int64 {
 	return m.backlogCounter.Load()
 }

@@ -175,6 +175,7 @@ func ThrottleRetry(operation Operation, policy RetryPolicy, isRetryable IsRetrya
 // Context timeout/cancellation errors are never retried, regardless of IsRetryable.
 // Resource exhausted error will be retried using a different throttle retry policy, instead of the specified one.
 // TODO: allow customizing throttle retry policy and what kind of error are categorized as throttle error.
+// 根据给定的重试策略，重试某个操作
 func ThrottleRetryContext(
 	ctx context.Context,
 	operation OperationCtx,

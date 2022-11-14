@@ -43,6 +43,7 @@ import (
 type (
 	// Forwarder is the type that contains state pertaining to
 	// the api call forwarder component
+	// 感觉就是从child向parent taskQueue发送任务的结构
 	Forwarder struct {
 		cfg           *forwarderConfig
 		taskQueueID   *taskQueueID

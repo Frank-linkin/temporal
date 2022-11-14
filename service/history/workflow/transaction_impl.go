@@ -227,6 +227,9 @@ func (t *TransactionImpl) SetWorkflowExecution(
 	return nil
 }
 
+//PersistWorkflowEvents 根据是否第一个WorkflowEvent，分别调用persistFirstWorkflowEvents和persistNonFirstWorkflowEvents
+//persistFirstWorkflowEvents 内部调用shard.Context的AppendHistoryEvents，返回其结果
+//与上面persistFirstWorkflowEvents的区别是，它的AppendHistoryNodesRequest.IsNewBranch=false
 func PersistWorkflowEvents(
 	ctx context.Context,
 	shard shard.Context,
@@ -244,6 +247,8 @@ func PersistWorkflowEvents(
 	return persistNonFirstWorkflowEvents(ctx, shard, workflowEvents)
 }
 
+//persistFirstWorkflowEvents 内部调用shard.Context的AppendHistoryEvents，返回其结果
+//与下面persistNonFirstWorkflowEvents的区别是，它的AppendHistoryNodesRequest.IsNewBranch=true
 func persistFirstWorkflowEvents(
 	ctx context.Context,
 	shard shard.Context,
@@ -279,6 +284,8 @@ func persistFirstWorkflowEvents(
 	return size, err
 }
 
+//persistFirstWorkflowEvents 内部调用shard.Context的AppendHistoryEvents，返回其结果
+//与上面persistFirstWorkflowEvents的区别是，它的AppendHistoryNodesRequest.IsNewBranch=false
 func persistNonFirstWorkflowEvents(
 	ctx context.Context,
 	shard shard.Context,
@@ -315,6 +322,7 @@ func persistNonFirstWorkflowEvents(
 	return size, err
 }
 
+//appendHistoryEvents 调用shard.Context的AppendHistoryEvents，返回其结果
 func appendHistoryEvents(
 	ctx context.Context,
 	shard shard.Context,
@@ -327,6 +335,9 @@ func appendHistoryEvents(
 	return int64(resp), err
 }
 
+//createWorkflowExecution 调用shard.Context的CreateWorkflowExecution,然后调用计量
+//shard.Context.CreateWorkflowExecution从自己ContextImpl中拿出s.ShardInfo中拿出rangeID,然后装到request，
+//调用executionManager.CreateWorkflowExecution
 func createWorkflowExecution(
 	ctx context.Context,
 	shard shard.Context,
@@ -416,6 +427,7 @@ func conflictResolveWorkflowExecution(
 	return resp, nil
 }
 
+//getWorkflowExecution 使用shard.Context的GetWorkflowExecution，然后更新计量
 func getWorkflowExecution(
 	ctx context.Context,
 	shard shard.Context,
@@ -441,6 +453,7 @@ func getWorkflowExecution(
 		}
 	}
 
+	// 更新计量
 	if namespaceEntry, err := shard.GetNamespaceRegistry().GetNamespaceByID(
 		namespace.ID(resp.State.ExecutionInfo.NamespaceId),
 	); err == nil {

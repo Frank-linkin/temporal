@@ -329,6 +329,9 @@ func (wh *WorkflowHandler) DeprecateNamespace(ctx context.Context, request *work
 // first workflow task for this instance.  It will return 'WorkflowExecutionAlreadyStartedError', if an instance already
 // exists with same workflowId.
 func (wh *WorkflowHandler) StartWorkflowExecution(ctx context.Context, request *workflowservice.StartWorkflowExecutionRequest) (_ *workflowservice.StartWorkflowExecutionResponse, retError error) {
+	//[joehanm-StartWorkflowExecution]
+	//从FrontEndService进来之后，FrontendService进行必要的参数检查，直接调用HistoryService
+	//user-made-workflow应该并没有作为参数传递进来，而是在注册到Worker上面了
 	defer log.CapturePanic(wh.logger, &retError)
 
 	if wh.isStopped() {

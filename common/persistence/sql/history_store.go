@@ -73,6 +73,7 @@ func (m *sqlExecutionStore) AppendHistoryNodes(
 	}
 
 	if !request.IsNewBranch {
+		//如果不是新建workflow,直接Insert就好
 		_, err = m.Db.InsertIntoHistoryNode(ctx, nodeRow)
 		if err != nil {
 			if m.Db.IsDupEntryError(err) {
@@ -91,7 +92,7 @@ func (m *sqlExecutionStore) AppendHistoryNodes(
 		Data:         treeInfoBlob.Data,
 		DataEncoding: treeInfoBlob.EncodingType.String(),
 	}
-
+	//因为要添加TreeRow和NodeRow，所以要开启事务
 	return m.txExecute(ctx, "AppendHistoryNodes", func(tx sqlplugin.Tx) error {
 		result, err := tx.InsertIntoHistoryNode(ctx, nodeRow)
 		if err != nil {

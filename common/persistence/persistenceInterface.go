@@ -66,9 +66,11 @@ type (
 		GetName() string
 		CreateTaskQueue(ctx context.Context, request *InternalCreateTaskQueueRequest) error
 		GetTaskQueue(ctx context.Context, request *InternalGetTaskQueueRequest) (*InternalGetTaskQueueResponse, error)
+		//UpdateTaskQueue 将taskQueueInfo序列化成taskQueueInfoBlob，插入Task_queues table中
 		UpdateTaskQueue(ctx context.Context, request *InternalUpdateTaskQueueRequest) (*UpdateTaskQueueResponse, error)
 		ListTaskQueue(ctx context.Context, request *ListTaskQueueRequest) (*InternalListTaskQueueResponse, error)
 		DeleteTaskQueue(ctx context.Context, request *DeleteTaskQueueRequest) error
+		//CreateTasks 然后将多个tasks插入到Tasks table中
 		CreateTasks(ctx context.Context, request *InternalCreateTasksRequest) (*CreateTasksResponse, error)
 		GetTasks(ctx context.Context, request *GetTasksRequest) (*InternalGetTasksResponse, error)
 		CompleteTask(ctx context.Context, request *CompleteTaskRequest) error

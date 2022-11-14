@@ -100,6 +100,7 @@ type (
 		logger log.Logger,
 	) nDCWorkflowResetter
 
+	//History的Replicator,这个具体的操作6.824之后再看
 	nDCHistoryReplicator interface {
 		ApplyEvents(
 			ctx context.Context,
