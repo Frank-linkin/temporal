@@ -214,7 +214,10 @@ func (h *Handler) PollActivityTaskQueue(
 		request.GetPollRequest().GetTaskQueue(),
 		metrics.MatchingPollActivityTaskQueueScope,
 	)
-
+	//[question-PollActivityTaskQueue] 也就是说PollActivityTaskQueue还会有不同到来源，并不全是来自FrontendService的
+	//ForwardedSource是以TaskQueue，因为Activtiy也有TaskQueue，所以ForwardedSource是不是就是workflow的TaskQueue呢
+	//而ForwardSource是与Poll绑定的，也就是说与worker绑定的，它反映了这个Poll是从哪里转发过来的
+	//[WaitForVerification]
 	if request.GetForwardedSource() != "" {
 		h.reportForwardedPerTaskQueueCounter(hCtx, namespace.ID(request.GetNamespaceId()))
 	}
@@ -226,7 +229,7 @@ func (h *Handler) PollActivityTaskQueue(
 	); err != nil {
 		return nil, err
 	}
-
+	//调用matchingEngine
 	response, err := h.engine.PollActivityTaskQueue(hCtx, request)
 	return response, err
 }

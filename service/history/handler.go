@@ -237,7 +237,7 @@ func (h *Handler) RecordActivityTaskHeartbeat(ctx context.Context, request *hist
 	if err != nil {
 		return nil, h.convertError(err)
 	}
-	//bookmark
+
 	response, err2 := engine.RecordActivityTaskHeartbeat(ctx, request)
 	if err2 != nil {
 		return nil, h.convertError(err2)
@@ -438,6 +438,7 @@ func (h *Handler) RespondActivityTaskCanceled(ctx context.Context, request *hist
 }
 
 // RespondWorkflowTaskCompleted - records completion of a workflow task
+// 一个workflowTask执行完了，带着其他的Command到来了。
 func (h *Handler) RespondWorkflowTaskCompleted(ctx context.Context, request *historyservice.RespondWorkflowTaskCompletedRequest) (_ *historyservice.RespondWorkflowTaskCompletedResponse, retError error) {
 	defer log.CapturePanic(h.logger, &retError)
 	h.startWG.Wait()

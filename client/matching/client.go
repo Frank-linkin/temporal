@@ -128,13 +128,16 @@ func (c *clientImpl) PollActivityTaskQueue(
 	ctx context.Context,
 	request *matchingservice.PollActivityTaskQueueRequest,
 	opts ...grpc.CallOption) (*matchingservice.PollActivityTaskQueueResponse, error) {
+	//loadBalancer在MatchingService里面
 	partition := c.loadBalancer.PickReadPartition(
 		namespace.ID(request.GetNamespaceId()),
 		*request.PollRequest.GetTaskQueue(),
 		enumspb.TASK_QUEUE_TYPE_ACTIVITY,
 		request.GetForwardedSource(),
 	)
+	//在matchingService里面partition就是TaskQueue
 	request.PollRequest.TaskQueue.Name = partition
+	// 根据Namespace+TaskQueue+TaskQueueTask获取client
 	client, err := c.getClientForTaskqueue(
 		request.NamespaceId,
 		request.PollRequest.TaskQueue,
@@ -145,6 +148,7 @@ func (c *clientImpl) PollActivityTaskQueue(
 	}
 	ctx, cancel := c.createLongPollContext(ctx)
 	defer cancel()
+	//对这个client发出pollActivityTaskQueue请求
 	return client.PollActivityTaskQueue(ctx, request, opts...)
 }
 

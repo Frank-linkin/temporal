@@ -297,7 +297,6 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskScheduledEventAsHeartbeat(
 		scheduledTime = timestamp.TimeValue(newWorkflowTaskEvent.GetEventTime())
 	}
 
-	//bookmark
 	workflowTask, err := m.ReplicateWorkflowTaskScheduledEvent(
 		m.ms.GetCurrentVersion(),
 		scheduledEventID,
@@ -430,6 +429,7 @@ func (m *workflowTaskStateMachine) AddWorkflowTaskStartedEvent(
 	return event, workflowTask, err
 }
 
+//AddWorkflowTaskCompletedEvent
 func (m *workflowTaskStateMachine) AddWorkflowTaskCompletedEvent(
 	scheduledEventID int64,
 	startedEventID int64,

@@ -171,6 +171,7 @@ func (t *TransactionImpl) UpdateWorkflowExecution(
 	if err != nil {
 		return 0, 0, err
 	}
+
 	resp, err := updateWorkflowExecution(ctx, t.shard, &persistence.UpdateWorkflowExecutionRequest{
 		ShardID: t.shard.GetShardID(),
 		// RangeID , this is set by shard context

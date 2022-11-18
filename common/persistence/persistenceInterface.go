@@ -72,6 +72,7 @@ type (
 		DeleteTaskQueue(ctx context.Context, request *DeleteTaskQueueRequest) error
 		//CreateTasks 然后将多个tasks插入到Tasks table中
 		CreateTasks(ctx context.Context, request *InternalCreateTasksRequest) (*CreateTasksResponse, error)
+		//GetTasks
 		GetTasks(ctx context.Context, request *GetTasksRequest) (*InternalGetTasksResponse, error)
 		CompleteTask(ctx context.Context, request *CompleteTaskRequest) error
 		CompleteTasksLessThan(ctx context.Context, request *CompleteTasksLessThanRequest) (int, error)

@@ -492,6 +492,7 @@ pollLoop:
 		pollerCtx := context.WithValue(hCtx.Context, pollerIDKey, pollerID)
 		pollerCtx = context.WithValue(pollerCtx, identityKey, request.GetIdentity())
 		taskQueueKind := request.TaskQueue.GetKind()
+		//获取Task
 		task, err := e.getTask(pollerCtx, taskQueue, maxDispatch, taskQueueKind)
 		if err != nil {
 			// TODO: Is empty poll the best reply for errPumpClosed?

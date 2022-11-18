@@ -160,6 +160,7 @@ func (handler *workflowTaskHandlerImpl) handleCommands(
 	var mutations []workflowTaskResponseMutation
 	var postActions []commandPostAction
 	for _, command := range commands {
+		//workflowTaskHandler 用来处理Command，
 		response, err := handler.handleCommand(ctx, command)
 		if err != nil || handler.stopProcessing {
 			return nil, err

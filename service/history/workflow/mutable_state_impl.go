@@ -106,22 +106,42 @@ var (
 
 type (
 	MutableStateImpl struct {
-		pendingActivityTimerHeartbeats map[int64]time.Time                    // Scheduled Event ID -> LastHeartbeatTimeoutVisibilityInSeconds.
-		pendingActivityInfoIDs         map[int64]*persistencespb.ActivityInfo // Scheduled Event ID -> Activity Info.
-		pendingActivityIDToEventID     map[string]int64                       // Activity ID -> Scheduled Event ID of the activity.
-		updateActivityInfos            map[int64]*persistencespb.ActivityInfo // Modified activities from last update.
-		deleteActivityInfos            map[int64]struct{}                     // Deleted activities from last update.
-		syncActivityTasks              map[int64]struct{}                     // Activity to be sync to remote
+		/**
+		可以看出MutableState分为以下几个部分
+		*/
+		//Looks like: the deadline of an activity
+		pendingActivityTimerHeartbeats map[int64]time.Time // Scheduled Event ID -> LastHeartbeatTimeoutVisibilityInSeconds.
+		//获取pendingActivityInfo
+		pendingActivityInfoIDs map[int64]*persistencespb.ActivityInfo // Scheduled Event ID -> Activity Info.
+		//将ActivityID转换成EventID，方便使用MutableState里面的功能
+		pendingActivityIDToEventID map[string]int64 // Activity ID -> Scheduled Event ID of the activity.
+		//最新的ActivityInfo。每次修改都把ActivityInfo存入这列，key是ScheduledEventId
+		updateActivityInfos map[int64]*persistencespb.ActivityInfo // Modified activities from last update.
+		//其实value里面没有存info，只是把ScheduledEventId放到这个map里面去
+		deleteActivityInfos map[int64]struct{} // Deleted activities from last update.
+		//ActivityTasks每次创建或者修改的时候，都会把自己的ScheduledEventId放到这个map当中去
+		syncActivityTasks map[int64]struct{} // Activity to be sync to remote
 
-		pendingTimerInfoIDs     map[string]*persistencespb.TimerInfo // User Timer ID -> Timer Info.
-		pendingTimerEventIDToID map[int64]string                     // User Timer Start Event ID -> User Timer ID.
-		updateTimerInfos        map[string]*persistencespb.TimerInfo // Modified timers from last update.
-		deleteTimerInfos        map[string]struct{}                  // Deleted timers from last update.
+		//Timer在MutableState中的标志是TimerID，
+		//通过TimerID获取TimerInfo
+		pendingTimerInfoIDs map[string]*persistencespb.TimerInfo // User Timer ID -> Timer Info.
+		//将EventID转换成TimerID
+		pendingTimerEventIDToID map[int64]string // User Timer Start Event ID -> User Timer ID.
+		//它的每一次修改都与pendingTimerInfoIDs，所以他俩存储着相同的信息。但是DB中取数据的时候不会赋值到updateTimerInfo身上。
+		//所以updateTimerInfo里面没有初始值
+		updateTimerInfos map[string]*persistencespb.TimerInfo // Modified timers from last update.
+		//如果这个Timer被delete了，那么将TimerID放入这个里面。但Value没有任何信息
+		deleteTimerInfos map[string]struct{} // Deleted timers from last update.
 
+		//initiatedEventID -> Child Executino Info，与updateChildExecutionInfos不同的是初始版本装到它这里
 		pendingChildExecutionInfoIDs map[int64]*persistencespb.ChildExecutionInfo // Initiated Event ID -> Child Execution Info
-		updateChildExecutionInfos    map[int64]*persistencespb.ChildExecutionInfo // Modified ChildExecution Infos since last update
-		deleteChildExecutionInfos    map[int64]struct{}                           // Deleted ChildExecution Info since last update
+		//记录着最新的ChildExecutionInfos
+		updateChildExecutionInfos map[int64]*persistencespb.ChildExecutionInfo // Modified ChildExecution Infos since last update
+		//记录着刚被Delete的ChildExecutionInfos
+		deleteChildExecutionInfos map[int64]struct{} // Deleted ChildExecution Info since last update
 
+		//pending开头的与UpdateRequestCancelInfo最大的不同是pendingRequestCancel里面有初始信息
+		//Initiated Event ID -> RequestCancelInfo
 		pendingRequestCancelInfoIDs map[int64]*persistencespb.RequestCancelInfo // Initiated Event ID -> RequestCancelInfo
 		updateRequestCancelInfos    map[int64]*persistencespb.RequestCancelInfo // Modified RequestCancel Infos since last update, for persistence update
 		deleteRequestCancelInfos    map[int64]struct{}                          // Deleted RequestCancel Info since last update, for persistence update
@@ -3824,6 +3844,7 @@ func (e *MutableStateImpl) StartTransaction(
 	return flushBeforeReady, nil
 }
 
+//CloseTransactionAsMutation
 func (e *MutableStateImpl) CloseTransactionAsMutation(
 	now time.Time,
 	transactionPolicy TransactionPolicy,
@@ -3835,7 +3856,7 @@ func (e *MutableStateImpl) CloseTransactionAsMutation(
 	); err != nil {
 		return nil, nil, err
 	}
-
+	//将event做成了replicationTasks
 	workflowEventsSeq, bufferEvents, clearBuffer, err := e.prepareEventsAndReplicationTasks(now, transactionPolicy)
 	if err != nil {
 		return nil, nil, err
@@ -3897,6 +3918,7 @@ func (e *MutableStateImpl) CloseTransactionAsMutation(
 	}
 
 	e.checksum = checksum
+	//清空当前mutableState里面的数据
 	if err := e.cleanupTransaction(transactionPolicy); err != nil {
 		return nil, nil, err
 	}
@@ -4142,6 +4164,7 @@ func (e *MutableStateImpl) prepareEventsAndReplicationTasks(
 	return workflowEventsSeq, newBufferBatch, clearBuffer, nil
 }
 
+//eventsToReplicationTask
 func (e *MutableStateImpl) eventsToReplicationTask(
 	transactionPolicy TransactionPolicy,
 	events []*historypb.HistoryEvent,

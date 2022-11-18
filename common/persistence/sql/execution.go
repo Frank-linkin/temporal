@@ -336,6 +336,7 @@ func (m *sqlExecutionStore) GetWorkflowExecution(
 	}, nil
 }
 
+//UpdateWorkflowExecution
 func (m *sqlExecutionStore) UpdateWorkflowExecution(
 	ctx context.Context,
 	request *p.InternalUpdateWorkflowExecutionRequest,

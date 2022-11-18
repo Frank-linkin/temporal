@@ -1064,6 +1064,7 @@ func (wh *WorkflowHandler) RespondWorkflowTaskFailed(
 // Application also needs to call 'RecordActivityTaskHeartbeat' API within 'heartbeatTimeoutSeconds' interval to
 // prevent the task from getting timed out.  An event 'ActivityTaskStarted' event is also written to workflow execution
 // history before the ActivityTask is dispatched to application worker.
+//
 func (wh *WorkflowHandler) PollActivityTaskQueue(ctx context.Context, request *workflowservice.PollActivityTaskQueueRequest) (_ *workflowservice.PollActivityTaskQueueResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
 
@@ -1487,6 +1488,7 @@ func (wh *WorkflowHandler) RespondActivityTaskCompletedById(ctx context.Context,
 // created for the workflow instance so new commands could be made.  Use the 'taskToken' provided as response of
 // PollActivityTaskQueue API call for completion. It fails with 'EntityNotExistsError' if the taskToken is not valid
 // anymore due to activity timeout.
+// ResponseFailed之后，首先会尝试去mutableState里面Retry Activity，如果不能Retry了，那就在mutableState里面添加ActivityTaskFailedEvent
 func (wh *WorkflowHandler) RespondActivityTaskFailed(
 	ctx context.Context,
 	request *workflowservice.RespondActivityTaskFailedRequest,
@@ -1578,6 +1580,7 @@ func (wh *WorkflowHandler) RespondActivityTaskFailed(
 // created for the workflow instance so new commands could be made.  Similar to RespondActivityTaskFailed but use
 // Namespace, WorkflowID and ActivityID instead of 'taskToken' for completion. It fails with 'EntityNotExistsError'
 // if the these IDs are not valid anymore due to activity timeout.
+// 同上一个
 func (wh *WorkflowHandler) RespondActivityTaskFailedById(ctx context.Context, request *workflowservice.RespondActivityTaskFailedByIdRequest) (_ *workflowservice.RespondActivityTaskFailedByIdResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
 
@@ -1689,6 +1692,7 @@ func (wh *WorkflowHandler) RespondActivityTaskFailedById(ctx context.Context, re
 // created for the workflow instance so new commands could be made.  Use the 'taskToken' provided as response of
 // PollActivityTaskQueue API call for completion. It fails with 'EntityNotExistsError' if the taskToken is not valid
 // anymore due to activity timeout.
+// 如上面英文所述，mutableState加一个AddActivityTaskCanceledEvent
 func (wh *WorkflowHandler) RespondActivityTaskCanceled(ctx context.Context, request *workflowservice.RespondActivityTaskCanceledRequest) (_ *workflowservice.RespondActivityTaskCanceledResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
 
@@ -1759,6 +1763,7 @@ func (wh *WorkflowHandler) RespondActivityTaskCanceled(ctx context.Context, requ
 // created for the workflow instance so new commands could be made.  Similar to RespondActivityTaskCanceled but use
 // Namespace, WorkflowID and ActivityID instead of 'taskToken' for completion. It fails with 'EntityNotExistsError'
 // if the these IDs are not valid anymore due to activity timeout.
+// 与上一个相同
 func (wh *WorkflowHandler) RespondActivityTaskCanceledById(ctx context.Context, request *workflowservice.RespondActivityTaskCanceledByIdRequest) (_ *workflowservice.RespondActivityTaskCanceledByIdResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
 
@@ -1856,6 +1861,7 @@ func (wh *WorkflowHandler) RespondActivityTaskCanceledById(ctx context.Context, 
 // It will result in a new 'WorkflowExecutionCancelRequested' event being written to the workflow history and a new WorkflowTask
 // created for the workflow instance so new commands could be made. It returns success if requested workflow already closed.
 // It fails with 'NotFound' if the requested workflow doesn't exist.
+// 向MutableState里添加AddWorkflowExecutionCancelRequestedEvent
 func (wh *WorkflowHandler) RequestCancelWorkflowExecution(ctx context.Context, request *workflowservice.RequestCancelWorkflowExecutionRequest) (_ *workflowservice.RequestCancelWorkflowExecutionResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
 
@@ -2035,6 +2041,7 @@ func (wh *WorkflowHandler) SignalWithStartWorkflowExecution(ctx context.Context,
 
 // ResetWorkflowExecution reset an existing workflow execution to WorkflowTaskCompleted event(exclusive).
 // And it will immediately terminating the current execution instance.
+// 强制terminate当前workflow的执行，并创建一个新的run
 func (wh *WorkflowHandler) ResetWorkflowExecution(ctx context.Context, request *workflowservice.ResetWorkflowExecutionRequest) (_ *workflowservice.ResetWorkflowExecutionResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
 
@@ -2079,6 +2086,7 @@ func (wh *WorkflowHandler) ResetWorkflowExecution(ctx context.Context, request *
 
 // TerminateWorkflowExecution terminates an existing workflow execution by recording WorkflowExecutionTerminated event
 // in the history and immediately terminating the execution instance.
+// 如上面英文所述，将一个TerminateWorkflowExecution Event作为最新的Event
 func (wh *WorkflowHandler) TerminateWorkflowExecution(ctx context.Context, request *workflowservice.TerminateWorkflowExecutionRequest) (_ *workflowservice.TerminateWorkflowExecutionResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
 
@@ -2112,6 +2120,7 @@ func (wh *WorkflowHandler) TerminateWorkflowExecution(ctx context.Context, reque
 
 // DeleteWorkflowExecution deletes a closed workflow execution asynchronously (workflow must be completed or terminated before).
 // This method is EXPERIMENTAL and may be changed or removed in a later release.
+//
 func (wh *WorkflowHandler) DeleteWorkflowExecution(ctx context.Context, request *workflowservice.DeleteWorkflowExecutionRequest) (_ *workflowservice.DeleteWorkflowExecutionResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
 
@@ -2142,6 +2151,7 @@ func (wh *WorkflowHandler) DeleteWorkflowExecution(ctx context.Context, request 
 }
 
 // ListOpenWorkflowExecutions is a visibility API to list the open executions in a specific namespace.
+//
 func (wh *WorkflowHandler) ListOpenWorkflowExecutions(ctx context.Context, request *workflowservice.ListOpenWorkflowExecutionsRequest) (_ *workflowservice.ListOpenWorkflowExecutionsResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
 
@@ -2633,6 +2643,7 @@ func (wh *WorkflowHandler) RespondQueryTaskCompleted(
 // Things cleared are:
 // 1. StickyTaskQueue
 // 2. StickyScheduleToStartTimeout
+//
 func (wh *WorkflowHandler) ResetStickyTaskQueue(ctx context.Context, request *workflowservice.ResetStickyTaskQueueRequest) (_ *workflowservice.ResetStickyTaskQueueResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
 
@@ -2865,6 +2876,7 @@ func (wh *WorkflowHandler) GetSystemInfo(ctx context.Context, request *workflows
 }
 
 // ListTaskQueuePartitions returns all the partition and host for a task queue.
+// 分别调用listTaskQueuePartitions和listTaskQueuePartitions，形成Response返回
 func (wh *WorkflowHandler) ListTaskQueuePartitions(ctx context.Context, request *workflowservice.ListTaskQueuePartitionsRequest) (_ *workflowservice.ListTaskQueuePartitionsResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
 

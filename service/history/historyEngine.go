@@ -1283,6 +1283,7 @@ func (e *historyEngineImpl) DeleteWorkflowExecution(
 	}
 
 	// If workflow execution is closed or in passive cluster.
+	//给WorkflowDeleteManager添加一个DeleteWorkflowExecutionTask
 	return e.workflowDeleteManager.AddDeleteWorkflowExecutionTask(
 		ctx,
 		namespace.ID(request.GetNamespaceId()),
@@ -1501,6 +1502,8 @@ func (e *historyEngineImpl) SyncActivity(
 
 // ResetWorkflowExecution terminates current workflow (if running) and replay & create new workflow
 // Consistency guarantee: always write
+// 我们传入的是base runid，其实如果一个workflowRun了多次，它会有多个Runid，这里要找到currentRunID,然后从baseMutableState
+// 里面提取相应的信息，用workflowResetter进行reset
 func (e *historyEngineImpl) ResetWorkflowExecution(
 	ctx context.Context,
 	resetRequest *historyservice.ResetWorkflowExecutionRequest,
@@ -1545,6 +1548,7 @@ func (e *historyEngineImpl) ResetWorkflowExecution(
 		baseRunID = currentRunID
 	}
 
+	//我们传入的是base runid，其实如果一个workflowRun了多次，它会有多个Runid，这里要找到currentRunID
 	var currentWFContext api.WorkflowContext
 	if currentRunID == baseRunID {
 		currentWFContext = baseWFContext
@@ -1566,6 +1570,7 @@ func (e *historyEngineImpl) ResetWorkflowExecution(
 	}
 
 	// dedup by requestID
+	//这个request是不是已经处理过了，也就是说已经reset了，但是因为网络或者其他原因，客户端又发了一遍
 	if currentWFContext.GetMutableState().GetExecutionState().CreateRequestId == request.GetRequestId() {
 		e.logger.Info("Duplicated reset request",
 			tag.WorkflowID(workflowID),
@@ -1576,6 +1581,7 @@ func (e *historyEngineImpl) ResetWorkflowExecution(
 		}, nil
 	}
 
+	//从baseMutableState中提取Reset的相关信息，然后利用workflowResetter进行reset
 	resetRunID := uuid.New()
 	baseRebuildLastEventID := request.GetWorkflowTaskFinishEventId() - 1
 	baseVersionHistories := baseMutableState.GetExecutionInfo().GetVersionHistories()

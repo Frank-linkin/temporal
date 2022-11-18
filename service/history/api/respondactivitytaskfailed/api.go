@@ -41,6 +41,7 @@ import (
 	"go.temporal.io/server/service/history/shard"
 )
 
+//Invoke ResponseFailed之后，首先会尝试去mutableState里面Retry Activity，如果不能Retry了，那就在mutableState里面添加ActivityTaskFailedEvent
 func Invoke(
 	ctx context.Context,
 	req *historyservice.RespondActivityTaskFailedRequest,
@@ -81,7 +82,7 @@ func Invoke(
 			if !mutableState.IsWorkflowExecutionRunning() {
 				return nil, consts.ErrWorkflowCompleted
 			}
-
+			//mutableState里面，真正标识一个Activity的，是scheduledEventID
 			scheduledEventID := token.GetScheduledEventId()
 			if scheduledEventID == common.EmptyEventID { // client call CompleteActivityById, so get scheduledEventID by activityID
 				scheduledEventID, err0 = api.GetActivityScheduledEventID(token.GetActivityId(), mutableState)
@@ -112,7 +113,7 @@ func Invoke(
 					Namespace: request.GetNamespace(),
 				})
 			}
-
+			//Activity ResponseFailed之后，首先会尝试去mutableState里面Retry，如果不能Retry了，那就在mutableState里面添加ActivityTaskFailedEvent
 			postActions := &api.UpdateWorkflowAction{}
 			failure := request.GetFailure()
 			retryState, err := mutableState.RetryActivity(ai, failure)

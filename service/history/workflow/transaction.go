@@ -32,6 +32,7 @@ import (
 
 //go:generate mockgen -copyright_file ../../../LICENSE -package $GOPACKAGE -source $GOFILE -destination transaction_mock.go
 type (
+	//Transaction 我觉得这个transaction更像是一个标记，标识这一套动作底层将用transaction
 	Transaction interface {
 		CreateWorkflowExecution(
 			ctx context.Context,

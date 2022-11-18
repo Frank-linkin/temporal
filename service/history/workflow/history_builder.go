@@ -67,7 +67,9 @@ type (
 
 	TaskIDGenerator func(number int) ([]int64, error)
 
+	//HistoryBuilder 在Memory里面存储所有所有的Event信息,并让其有效并符合逻辑。finish可以生成将HistoryBuilder目前为止所有的信息都做成一个HistoryMutation
 	HistoryBuilder struct {
+		//HistoryBuilder有两种，MutableHistoryBuilder，ImmutableHistoryBuilder
 		state           HistoryBuilderState
 		timeSource      clock.TimeSource
 		taskIDGenerator TaskIDGenerator
@@ -141,10 +143,11 @@ func NewImmutableHistoryBuilder(
 	}
 }
 
-// NOTE:
+//AddWorkflowExecutionStartedEvent
+//NOTE:
 // originalRunID is the runID when the WorkflowExecutionStarted event is written
 // firstRunID is the very first runID along the chain of ContinueAsNew and Reset
-
+// 生成WorkflowExecutionStartedEvent并放入b.memLatestBatch
 func (b *HistoryBuilder) AddWorkflowExecutionStartedEvent(
 	startTime time.Time,
 	request *historyservice.StartWorkflowExecutionRequest,
@@ -194,6 +197,7 @@ func (b *HistoryBuilder) AddWorkflowExecutionStartedEvent(
 	return b.appendEvents(event)
 }
 
+//AddWorkflowTaskScheduledEvent WorkflowTaskScheduled-> b.memLatestBatch
 func (b *HistoryBuilder) AddWorkflowTaskScheduledEvent(
 	taskQueue *taskqueuepb.TaskQueue,
 	startToCloseTimeout *time.Duration,
@@ -212,6 +216,7 @@ func (b *HistoryBuilder) AddWorkflowTaskScheduledEvent(
 	return b.appendEvents(event)
 }
 
+//AddWorkflowTaskStartedEvent WorkflowTaskScheduled-> b.memLatestBatch
 func (b *HistoryBuilder) AddWorkflowTaskStartedEvent(
 	scheduledEventID int64,
 	requestID string,
@@ -230,6 +235,7 @@ func (b *HistoryBuilder) AddWorkflowTaskStartedEvent(
 	return b.appendEvents(event)
 }
 
+//AddWorkflowTaskCompletedEvent -> b.memLatestBatch
 func (b *HistoryBuilder) AddWorkflowTaskCompletedEvent(
 	scheduledEventID int64,
 	startedEventID int64,
@@ -249,6 +255,7 @@ func (b *HistoryBuilder) AddWorkflowTaskCompletedEvent(
 	return b.appendEvents(event)
 }
 
+//AddWorkflowTaskTimedOutEvent -> b.memLatestBatch
 func (b *HistoryBuilder) AddWorkflowTaskTimedOutEvent(
 	scheduledEventID int64,
 	startedEventID int64,
@@ -266,6 +273,7 @@ func (b *HistoryBuilder) AddWorkflowTaskTimedOutEvent(
 	return b.appendEvents(event)
 }
 
+//AddWorkflowTaskFailedEvent -> b.memLatestBatch
 func (b *HistoryBuilder) AddWorkflowTaskFailedEvent(
 	scheduledEventID int64,
 	startedEventID int64,
@@ -294,6 +302,7 @@ func (b *HistoryBuilder) AddWorkflowTaskFailedEvent(
 	return b.appendEvents(event)
 }
 
+//AddActivityTaskScheduledEvent -> b.memLatestBatch
 func (b *HistoryBuilder) AddActivityTaskScheduledEvent(
 	workflowTaskCompletedEventID int64,
 	command *commandpb.ScheduleActivityTaskCommandAttributes,
@@ -318,6 +327,7 @@ func (b *HistoryBuilder) AddActivityTaskScheduledEvent(
 	return b.appendEvents(event)
 }
 
+//AddActivityTaskScheduledEvent -> b.memBufferBatch
 func (b *HistoryBuilder) AddActivityTaskStartedEvent(
 	scheduledEventID int64,
 	attempt int32,
@@ -1041,6 +1051,7 @@ func (b *HistoryBuilder) AddChildWorkflowExecutionTimedOutEvent(
 	return b.appendEvents(event)
 }
 
+//appendEvents 根据是否可以被buffer，分别放入buffedEvents和LatestBatch
 func (b *HistoryBuilder) appendEvents(
 	event *historypb.HistoryEvent,
 ) *historypb.HistoryEvent {
@@ -1065,6 +1076,8 @@ func (b *HistoryBuilder) NextEventID() int64 {
 	return b.nextEventID
 }
 
+//FlushBufferToCurrentBatch 将b.memBufferBatch放入b.dbBufferBatch之后，修改其中的数据让其合理之后
+//放入b.memLatestBatch之中
 func (b *HistoryBuilder) FlushBufferToCurrentBatch() map[int64]int64 {
 	if len(b.dbBufferBatch) == 0 && len(b.memBufferBatch) == 0 {
 		return b.scheduledIDToStartedID
@@ -1083,28 +1096,35 @@ func (b *HistoryBuilder) FlushBufferToCurrentBatch() map[int64]int64 {
 	}
 
 	b.dbClearBuffer = b.dbClearBuffer || len(b.dbBufferBatch) > 0
+	//将memory中的bufferBatch放入dbBufferBatch之后，清空b.dbBufferBatch和b.memBufferBatch
 	bufferBatch := append(b.dbBufferBatch, b.memBufferBatch...)
 	b.dbBufferBatch = nil
 	b.memBufferBatch = nil
 
 	// 0th reorder events in case casandra reorder the buffered events
 	// TODO eventually remove this ordering
+	//将bufferBatch排序
 	bufferBatch = b.reorderBuffer(bufferBatch)
 
 	// 1st assign event ID
+	// 给每个Event赋予EventID
 	for _, event := range bufferBatch {
 		event.EventId = b.nextEventID
 		b.nextEventID += 1
 	}
 
+	// 连接这些Event，补齐Event的数据，让其变得合理
+	// 同时，b.scheduledIDToStartedID也记住了所有ScheduleIDToStartedID转化
 	// 2nd wire event ID, e.g. activity, child workflow
 	b.wireEventIDs(bufferBatch)
 
+	//将生成的bufferBatch放入memLatestBatch
 	b.memLatestBatch = append(b.memLatestBatch, bufferBatch...)
 
 	return b.scheduledIDToStartedID
 }
 
+//FlushAndCreateNewBatch 将b.memLatestBatch放入b.memEventsBatches之后，并且清空
 func (b *HistoryBuilder) FlushAndCreateNewBatch() {
 	b.assertNotSealed()
 	if len(b.memLatestBatch) == 0 {
@@ -1115,6 +1135,7 @@ func (b *HistoryBuilder) FlushAndCreateNewBatch() {
 	b.memLatestBatch = nil
 }
 
+//Finish 将HistoryBuilder目前为止所有的信息都做成一个HistoryMutation
 func (b *HistoryBuilder) Finish(
 	flushBufferEvent bool,
 ) (*HistoryMutation, error) {

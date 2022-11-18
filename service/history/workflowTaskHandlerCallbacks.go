@@ -319,6 +319,7 @@ func (handler *workflowTaskHandlerCallbacksImpl) handleWorkflowTaskFailed(
 	)
 }
 
+//handleWorkflowTaskCompleted
 func (handler *workflowTaskHandlerCallbacksImpl) handleWorkflowTaskCompleted(
 	ctx context.Context,
 	req *historyservice.RespondWorkflowTaskCompletedRequest,
@@ -380,6 +381,7 @@ func (handler *workflowTaskHandlerCallbacksImpl) handleWorkflowTaskCompleted(
 		handler.metricsClient.IncCounter(metrics.HistoryRespondWorkflowTaskCompletedScope, metrics.AutoResetPointsLimitExceededCounter)
 	}
 
+	//如果有WorkflowTaskHeartbeating，就处理WorkflowTaskHeartbeating
 	workflowTaskHeartbeating := request.GetForceCreateNewWorkflowTask() && len(request.Commands) == 0
 	var workflowTaskHeartbeatTimeout bool
 	var completedEvent *historypb.HistoryEvent
@@ -403,6 +405,7 @@ func (handler *workflowTaskHandlerCallbacksImpl) handleWorkflowTaskCompleted(
 			}
 		}
 	} else {
+		//确实只是AddWorkflowTaskCompletedEvent
 		completedEvent, err = ms.AddWorkflowTaskCompletedEvent(scheduledEventID, startedEventID, request, maxResetPoints)
 		if err != nil {
 			return nil, err
@@ -429,6 +432,7 @@ func (handler *workflowTaskHandlerCallbacksImpl) handleWorkflowTaskCompleted(
 		executionInfo.StickyScheduleToStartTimeout = request.StickyAttributes.GetScheduleToStartTimeout()
 	}
 
+	//处理这一堆Command
 	binChecksum := request.GetBinaryChecksum()
 	if err := namespaceEntry.VerifyBinaryChecksum(binChecksum); err != nil {
 		wtFailedCause = NewWorkflowTaskFailedCause(enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_BINARY, serviceerror.NewInvalidArgument(fmt.Sprintf("binary %v is already marked as bad deployment", binChecksum)))
@@ -580,7 +584,7 @@ func (handler *workflowTaskHandlerCallbacksImpl) handleWorkflowTaskCompleted(
 			if err != nil {
 				return nil, err
 			}
-
+			//看样子，先terminate，然后在update
 			eventBatchFirstEventID := ms.GetNextEventID()
 			if err := workflow.TerminateWorkflow(
 				ms,

@@ -71,7 +71,7 @@ type (
 		GetNamespaceID() namespace.ID
 		GetWorkflowID() string
 		GetRunID() string
-
+		//
 		LoadMutableState(ctx context.Context) (MutableState, error)
 		LoadExecutionStats(ctx context.Context) (*persistencespb.ExecutionStats, error)
 		Clear()
@@ -297,7 +297,7 @@ func (c *ContextImpl) LoadMutableState(ctx context.Context) (MutableState, error
 		c.stats = response.State.ExecutionInfo.ExecutionStats
 	}
 	//3.开启当前NameSpace的transaction
-	//bookmark2022.11.11
+
 	//MutableState到底是用来做什么的？
 	flushBeforeReady, err := c.MutableState.StartTransaction(namespaceEntry)
 	if err != nil {
@@ -499,6 +499,13 @@ func (c *ContextImpl) ConflictResolveWorkflowExecution(
 }
 
 //UpdateWorkflowExecutionAsActive
+//UpdateWorkflowExecutionWithNewAsActive
+//UpdateWorkflowExecutionAsPassive
+//UpdateWorkflowExecutionWithNewAsPassive
+//以上其实都调用了UpdateWorkflowExecutionWithNew，只是使用了不同的参数。
+//AsPassive和Active是指TransactionPolicy的Active和Passive。
+//WithNew和没有withNew的区别就是是否有新的Context和MutableState
+//上述4个updateMode=UpdateWorkflowModeUpdateCurrent
 func (c *ContextImpl) UpdateWorkflowExecutionAsActive(
 	ctx context.Context,
 	now time.Time,
@@ -532,6 +539,13 @@ func (c *ContextImpl) UpdateWorkflowExecutionAsActive(
 	return nil
 }
 
+//UpdateWorkflowExecutionAsActive
+//UpdateWorkflowExecutionWithNewAsActive
+//UpdateWorkflowExecutionAsPassive
+//UpdateWorkflowExecutionWithNewAsPassive
+//以上其实都调用了UpdateWorkflowExecutionWithNew，只是使用了不同的参数。
+//AsPassive和Active是指TransactionPolicy的Active和Passive。
+//WithNew和没有withNew的区别就是是否有新的Context和MutableState
 func (c *ContextImpl) UpdateWorkflowExecutionWithNewAsActive(
 	ctx context.Context,
 	now time.Time,
@@ -550,6 +564,13 @@ func (c *ContextImpl) UpdateWorkflowExecutionWithNewAsActive(
 	)
 }
 
+//UpdateWorkflowExecutionAsActive
+//UpdateWorkflowExecutionWithNewAsActive
+//UpdateWorkflowExecutionAsPassive
+//UpdateWorkflowExecutionWithNewAsPassive
+//以上其实都调用了UpdateWorkflowExecutionWithNew，只是使用了不同的参数。
+//AsPassive和Active是指TransactionPolicy的Active和Passive。
+//WithNew和没有withNew的区别就是是否有新的Context和MutableState
 func (c *ContextImpl) UpdateWorkflowExecutionAsPassive(
 	ctx context.Context,
 	now time.Time,
@@ -566,6 +587,13 @@ func (c *ContextImpl) UpdateWorkflowExecutionAsPassive(
 	)
 }
 
+//UpdateWorkflowExecutionAsActive
+//UpdateWorkflowExecutionWithNewAsActive
+//UpdateWorkflowExecutionAsPassive
+//UpdateWorkflowExecutionWithNewAsPassive
+//以上其实都调用了UpdateWorkflowExecutionWithNew，只是使用了不同的参数。
+//AsPassive和Active是指TransactionPolicy的Active和Passive。
+//WithNew和没有withNew的区别就是是否有新的Context和MutableState
 func (c *ContextImpl) UpdateWorkflowExecutionWithNewAsPassive(
 	ctx context.Context,
 	now time.Time,
@@ -584,6 +612,7 @@ func (c *ContextImpl) UpdateWorkflowExecutionWithNewAsPassive(
 	)
 }
 
+//UpdateWorkflowExecutionWithNew
 func (c *ContextImpl) UpdateWorkflowExecutionWithNew(
 	ctx context.Context,
 	now time.Time,
@@ -599,7 +628,7 @@ func (c *ContextImpl) UpdateWorkflowExecutionWithNew(
 			c.Clear()
 		}
 	}()
-
+	//[question-UpdateWorkflowExecutionWithNew]停止MutableState的transaction?为什么MutableState会有transaction
 	currentWorkflow, currentWorkflowEventsSeq, err := c.MutableState.CloseTransactionAsMutation(
 		now,
 		currentWorkflowTransactionPolicy,
